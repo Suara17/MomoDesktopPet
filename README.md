@@ -1,44 +1,50 @@
-# 墨墨 & 团子 Android 悬浮桌宠项目工程
+# <img src="docs/images/ic_launcher.png" width="42" height="42" valign="middle" alt="App Icon"> 墨墨 & 团子 Android 悬浮桌宠
 
-一个轻量、生动可爱的 Android 顶层悬浮桌宠，支持丰富的动作序列帧、手势交互、番茄钟、状态切换以及开箱即用的体验。
-
-## 📦 Releases 下载
-
-- **最新安装包与资源包**：请前往 [Releases 页面](https://github.com/Suara17/MomoDesktopPet/releases)
-  - `墨墨与团子桌宠.apk`：开箱即用 Android 客户端安装包
-  - `Momo_DesktopPet_SmilingHug.zip`：动作序列帧素材包（包含 2100+ 帧及动图预览）
-  - `Momo_EdgeModes.zip`：边缘停靠模式扩展素材包
+一个生动、轻量且可爱的 Android 顶层悬浮桌宠客户端。支持丰富的序列帧微动作、手势交互拖拽、学习与专注模式、以及智能贴边停靠探头。
 
 ---
 
-## 📁 目录结构
+## 🎬 效果演示
 
-```text
-├── AndroidManifest.xml          # 悬浮窗 SYSTEM_ALERT_WINDOW 与前台服务声明
-├── src/com/momo/pet/
-│   ├── MainActivity.java        # 权限检测、申请及启停桌宠的控制面板
-│   ├── PetFloatingService.java  # 悬浮窗管理、逐帧动画引擎、手势系统与状态机
-│   └── BootReceiver.java        # 开机广播自启接收器
-└── res/
-    ├── drawable/                # 气泡背景、控制面板卡片背景、应用图标等
-    ├── values/                  # 字符串与配色定义
-    └── layout/                  # 布局文件定义
-```
+| 待机与呼吸互动 | 拥抱互动 | 逗猫互动 |
+| :---: | :---: | :---: |
+| <img src="docs/images/preview_idle.gif" width="210" alt="待机状态"> | <img src="docs/images/preview_hug.gif" width="210" alt="拥抱状态"> | <img src="docs/images/preview_cat.gif" width="210" alt="逗猫状态"> |
 
-## ✨ 核心功能与技术实现
+| 专注/学习状态 | 平滑手势拖拽 | 边缘停靠/探头收纳 |
+| :---: | :---: | :---: |
+| <img src="docs/images/preview_study.gif" width="210" alt="学习状态"> | <img src="docs/images/preview_drag.gif" width="210" alt="拖拽状态"> | <img src="docs/images/preview_edge.gif" width="210" alt="边缘停靠"> |
 
-1. **顶层悬浮窗引擎**：
-   - 基于 `WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY` 实现全系统顶层无缝悬浮与渲染。
-2. **多维手势系统**：
-   - 支持单击互动、双击缩放形态、长按拖拽吸附及边缘交互。
-3. **逐帧状态机与随机事件**：
-   - 包含日常待机、眨眼、抱猫、喝水、专注计时与超时入睡机制。
-4. **边缘停靠模式**：
-   - 拖至屏幕边缘自动切换收纳/探头模式，保持桌面清爽不遮挡工作区。
+---
+
+## 📦 下载与安装
+
+前往 [Releases 发布页面](https://github.com/Suara17/MomoDesktopPet/releases/tag/v1.0.0) 获取最新产物：
+
+- **开箱即用安装包**：[](https://github.com/Suara17/MomoDesktopPet/releases/download/v1.0.0/MomoDesktopPet.apk)（Android 客户端安装包）
+- **全套动作素材包**：[](https://github.com/Suara17/MomoDesktopPet/releases/download/v1.0.0/Momo_DesktopPet_Assets.zip)（包含 2400+ 帧高清序列帧与 GIF 动图素材）
+
+---
+
+## ✨ 核心特性
+
+1. **系统级顶层悬浮**：
+   - 基于 Android  实现，支持全界面无缝悬浮陪伴。
+2. **灵动手势与交互响应**：
+   - 支持单击互动反馈、双击体型缩放切换、长按平滑拖拽与物理跟随。
+3. **逐帧状态机与随机生活事件**：
+   - 包含眨眼、发呆、喝水、抱猫、专注计时以及闲置入睡等状态机制。
+4. **智能贴边探头收纳**：
+   - 拖至屏幕左右边缘自动触发收纳或探头模式，保持桌面清爽，不干扰日常操作。
+
+---
+
+## 📁 项目目录组织
+
+
 
 ---
 
 ## 🛠️ 构建与运行
 
-1. 可直接将本工程导入 Android Studio 进行调试与二次开发。
-2. 确保在系统设置中授予应用 **「显示在其他应用的上层」（悬浮窗权限）**。
+1. 本工程可直接导入 Android Studio 进行调试与二次开发。
+2. 首次运行请在系统设置中授予 **「显示在其他应用的上层」（悬浮窗权限）** 即可正常体验。
