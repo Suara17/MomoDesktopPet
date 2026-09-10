@@ -1,19 +1,44 @@
 # 墨墨 & 团子 Android 悬浮桌宠项目工程
 
-这是一个可以直接导入 Android Studio，或者直接在本地/服务器通过命令行构建的 Android 源码工程。
+一个轻量、生动可爱的 Android 顶层悬浮桌宠，支持丰富的动作序列帧、手势交互、番茄钟、状态切换以及开箱即用的体验。
 
-## 目录结构
-- `AndroidManifest.xml`：包含悬浮窗权限 SYSTEM_ALERT_WINDOW 与前台服务声明
-- `src/com/momo/pet/`：
-  - `MainActivity.java`：权限检测、申请及启停桌宠的控制面板 Activity
-  - `PetFloatingService.java`：悬浮窗窗口管理、逐帧动画引擎、手势拖拽缩放与状态机
-- `assets/`：
-  - `manifest.json`：动作序列帧配置文件
-  - `frames/`：包含全套 44 帧 PNG 动作素材
-- `res/`：
-  - 图标与字符串资源
+## 📦 Releases 下载
 
-## 核心技术点
-1. **纯代码动态构建悬浮窗 UI**：使用 `WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY` 实现跨界面顶层悬浮。
-2. **手势识别系统**：区分单击互动、双击缩放体型以及长按拖拽位置。
-3. **轻量逐帧状态机**：支持待机循环、呼吸、随机事件（眨眼/抱猫/喝水）、拖拽态与超时入睡机制。
+- **最新安装包与资源包**：请前往 [Releases 页面](https://github.com/Suara17/MomoDesktopPet/releases)
+  - `墨墨与团子桌宠.apk`：开箱即用 Android 客户端安装包
+  - `Momo_DesktopPet_SmilingHug.zip`：动作序列帧素材包（包含 2100+ 帧及动图预览）
+  - `Momo_EdgeModes.zip`：边缘停靠模式扩展素材包
+
+---
+
+## 📁 目录结构
+
+```text
+├── AndroidManifest.xml          # 悬浮窗 SYSTEM_ALERT_WINDOW 与前台服务声明
+├── src/com/momo/pet/
+│   ├── MainActivity.java        # 权限检测、申请及启停桌宠的控制面板
+│   ├── PetFloatingService.java  # 悬浮窗管理、逐帧动画引擎、手势系统与状态机
+│   └── BootReceiver.java        # 开机广播自启接收器
+└── res/
+    ├── drawable/                # 气泡背景、控制面板卡片背景、应用图标等
+    ├── values/                  # 字符串与配色定义
+    └── layout/                  # 布局文件定义
+```
+
+## ✨ 核心功能与技术实现
+
+1. **顶层悬浮窗引擎**：
+   - 基于 `WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY` 实现全系统顶层无缝悬浮与渲染。
+2. **多维手势系统**：
+   - 支持单击互动、双击缩放形态、长按拖拽吸附及边缘交互。
+3. **逐帧状态机与随机事件**：
+   - 包含日常待机、眨眼、抱猫、喝水、专注计时与超时入睡机制。
+4. **边缘停靠模式**：
+   - 拖至屏幕边缘自动切换收纳/探头模式，保持桌面清爽不遮挡工作区。
+
+---
+
+## 🛠️ 构建与运行
+
+1. 可直接将本工程导入 Android Studio 进行调试与二次开发。
+2. 确保在系统设置中授予应用 **「显示在其他应用的上层」（悬浮窗权限）**。

@@ -1,0 +1,11 @@
+# Android build & local files
+build/
+.gradle/
+*.apk
+*.aab
+*.idsig
+*.zip
+local.properties
+.idea/
+*.iml
+.DS_Store
