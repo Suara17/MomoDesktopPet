@@ -54,6 +54,7 @@ public class PetFloatingService extends Service {
     private TextView bubbleView;
     private TextView timerView;
     private LinearLayout menuLayout;
+    private android.widget.FrameLayout circleOverlay;
     private WindowManager.LayoutParams params;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -108,9 +109,9 @@ public class PetFloatingService extends Service {
     private long lastTapTime = 0;
     private boolean hasTriggeredLongPress = false;
 
-    // 尺寸档位
-    private final int[] SIZES_DP = {120, 160, 200};
-    private int sizeIdx = 1;
+    // 尺寸档位：迷你(90dp)、小巧(125dp)、标准(160dp)、大只(200dp)
+    private final int[] SIZES_DP = {90, 125, 160, 200};
+    private int sizeIdx = 2; // 默认标准档位
 
     // 分场景台词库：轻松、可爱、正向，但不强行灌鸡汤
     private final String[] QUOTES_NORMAL = {
@@ -391,7 +392,8 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
         bubbleView.setBackgroundResource(R.drawable.bg_bubble);
         bubbleView.setTextColor(0xFFFFFFFF);
         bubbleView.setTextSize(13);
-        bubbleView.setMaxWidth(dp(210));
+        int maxBubbleWidth = dp(SIZES_DP[sizeIdx] - 10);
+        bubbleView.setMaxWidth(Math.max(dp(120), maxBubbleWidth));
         bubbleView.setGravity(Gravity.CENTER);
         bubbleView.setLineSpacing(dp(2), 1f);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -414,7 +416,32 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
         ip.gravity = Gravity.CENTER_HORIZONTAL;
         petImageView.setLayoutParams(ip);
         petImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        container.addView(petImageView);
+
+        // 人物与环形按钮重叠容器
+        android.widget.FrameLayout petLayer = new android.widget.FrameLayout(this);
+        petLayer.setClipChildren(false);
+        petLayer.setClipToPadding(false);
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        plp.gravity = Gravity.CENTER_HORIZONTAL;
+        petLayer.setLayoutParams(plp);
+        petLayer.addView(petImageView);
+
+        // 围绕人物的环形按键容器 (绝对坐标排布)
+        circleOverlay = new android.widget.FrameLayout(this);
+        circleOverlay.setClipChildren(false);
+        circleOverlay.setClipToPadding(false);
+        circleOverlay.setVisibility(View.GONE);
+        android.widget.FrameLayout.LayoutParams clp = new android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+        );
+        circleOverlay.setLayoutParams(clp);
+        petLayer.addView(circleOverlay);
+
+        container.addView(petLayer);
 
         // 4. 模式切换悬浮菜单 (Menu Card)
         menuLayout = new LinearLayout(this);
@@ -512,8 +539,8 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
                             });
                         }
                     } else if (dur < 300) {
-                        // 如果菜单正开着，点击墨墨则收起菜单
-                        if (menuLayout.getVisibility() == View.VISIBLE) {
+                        // 如果菜单或环形按钮正开着，点击墨墨则收起菜单
+                        if (menuLayout.getVisibility() == View.VISIBLE || circleOverlay.getVisibility() == View.VISIBLE) {
                             hideMenu();
                             return true;
                         }
@@ -571,12 +598,29 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
         lastInteractMs = System.currentTimeMillis();
         sizeIdx = (sizeIdx + 1) % SIZES_DP.length;
         int sz = dp(SIZES_DP[sizeIdx]);
-        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) petImageView.getLayoutParams();
-        lp.width = sz; lp.height = sz;
-        petImageView.setLayoutParams(lp);
-        windowManager.updateViewLayout(petContainer, params);
+        android.view.ViewGroup.LayoutParams lp = petImageView.getLayoutParams();
+        if (lp != null) {
+            lp.width = sz;
+            lp.height = sz;
+            petImageView.setLayoutParams(lp);
+        }
+        if (bubbleView != null) {
+            int maxBubbleWidth = dp(SIZES_DP[sizeIdx] - 10);
+            bubbleView.setMaxWidth(Math.max(dp(120), maxBubbleWidth));
+        }
+        if (edgeMode) {
+            snapToEdge();
+        } else {
+            windowManager.updateViewLayout(petContainer, params);
+        }
 
-        String desc = sizeIdx == 0 ? "小巧模式" : sizeIdx == 1 ? "标准模式" : "大只墨墨";
+        String desc;
+        switch (sizeIdx) {
+            case 0: desc = "迷你模式"; break;
+            case 1: desc = "小巧模式"; break;
+            case 2: desc = "标准模式"; break;
+            default: desc = "大只墨墨"; break;
+        }
         showBubble("体型切换: " + desc + " 🐱", 2000);
         playOnce("happy", new Runnable() {
             @Override public void run() { resumeCurrentMode(); }
@@ -585,7 +629,7 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
 
     private void onLongPress() {
         lastInteractMs = System.currentTimeMillis();
-        if (menuLayout.getVisibility() == View.VISIBLE) {
+        if (circleOverlay.getVisibility() == View.VISIBLE || menuLayout.getVisibility() == View.VISIBLE) {
             hideMenu();
         } else {
             showMainMenu();
@@ -593,55 +637,112 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  模式切换菜单系统
+    //  模式切换菜单系统（环形主菜单 + 卡片子菜单）
     // ═══════════════════════════════════════════════════════════════
 
     private void showMainMenu() {
-        menuLayout.removeAllViews();
+        if (circleOverlay == null) return;
+        circleOverlay.removeAllViews();
+        menuLayout.setVisibility(View.GONE);
 
-        TextView title = new TextView(this);
-        title.setText("模式切换");
-        title.setTextSize(12);
-        title.setTextColor(0xFF888899);
-        title.setGravity(Gravity.CENTER);
-        title.setPadding(0, 0, 0, dp(8));
-        menuLayout.addView(title);
+        int sz = dp(SIZES_DP[sizeIdx]);
+        // 针对不同体型自适应按键尺寸与边距，确保 100% 完整落在人物图层四角内侧
+        int btnSz = (sizeIdx == 0) ? dp(30) : (sizeIdx == 1 ? dp(36) : dp(40));
+        int pad = (sizeIdx == 0) ? dp(2) : dp(4);
 
-        // 学习模式按钮
-        Button studyBtn = createMenuButton("🎓 学习模式", 0xFF2D323E);
-        studyBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showTimerSelection(Mode.STUDY); }
-        });
-        menuLayout.addView(studyBtn);
+        // 紧凑四角环形配置（左上、右上、右下、左下），完全在容器尺寸内部，不受父级边界裁切
+        class CornerBtnConfig {
+            String label;
+            int left;
+            int top;
+            int bgColor;
+            int textColor;
+            View.OnClickListener listener;
+            CornerBtnConfig(String l, int lf, int tp, int bg, int tc, View.OnClickListener lis) {
+                label = l; left = lf; top = tp; bgColor = bg; textColor = tc; listener = lis;
+            }
+        }
 
-        // 休闲模式按钮
-        Button leisureBtn = createMenuButton("☕ 休闲模式", 0xFF2D323E);
-        leisureBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showTimerSelection(Mode.LEISURE); }
-        });
-        menuLayout.addView(leisureBtn);
+        List<CornerBtnConfig> list = new ArrayList<>();
+        // 1. 专注（左上）
+        list.add(new CornerBtnConfig("专注", pad, pad, 0xEE1E293B, 0xFF6EE7B7, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                circleOverlay.setVisibility(View.GONE);
+                showTimerSelection(Mode.STUDY);
+            }
+        }));
 
-        // 若当前处于特殊模式或正在计时，显示退出按钮
+        // 2. 休闲（右上）
+        list.add(new CornerBtnConfig("休闲", sz - pad - btnSz, pad, 0xEE1E293B, 0xFFFCD34D, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                circleOverlay.setVisibility(View.GONE);
+                showTimerSelection(Mode.LEISURE);
+            }
+        }));
+
+        // 3. 音乐（右下）
+        list.add(new CornerBtnConfig("音乐", sz - pad - btnSz, sz - pad - btnSz, 0xEE1E293B, 0xFFC084FC, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                circleOverlay.setVisibility(View.GONE);
+                showMusicMenu();
+            }
+        }));
+
+        // 4. 统计（左下）
+        list.add(new CornerBtnConfig("统计", pad, sz - pad - btnSz, 0xEE1E293B, 0xFF38BDF8, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                hideMenu();
+                Intent intent = new Intent(PetFloatingService.this, StatsActivity.class);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+            }
+        }));
+
+        // 5. 若正在计时或在特殊模式，正下方加一个红色的退出圆形按钮（中下）
         if (currentMode != Mode.NORMAL || timerRunning) {
-            Button normalBtn = createMenuButton("⏹️ 结束计时 / 自由待机", 0xFF442D2D);
-            normalBtn.setTextColor(0xFFFF8888);
-            normalBtn.setOnClickListener(new View.OnClickListener() {
+            list.add(new CornerBtnConfig("结束", (sz - btnSz) / 2, sz - pad - btnSz, 0xEE450A0A, 0xFFFCA5A5, new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     switchToNormalMode();
                     hideMenu();
                 }
-            });
-            menuLayout.addView(normalBtn);
+            }));
         }
 
-        menuLayout.setVisibility(View.VISIBLE);
+        for (CornerBtnConfig cfg : list) {
+            Button b = new Button(this);
+            b.setText(cfg.label);
+            b.setTextSize(sizeIdx == 0 ? 9 : (sizeIdx == 1 ? 11 : 12));
+            b.setTypeface(null, android.graphics.Typeface.BOLD);
+            b.setTextColor(cfg.textColor);
+            b.setPadding(0, 0, 0, 0);
+            b.setGravity(Gravity.CENTER);
+
+            // 纯净极简圆形背景
+            android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+            gd.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            gd.setColor(cfg.bgColor);
+            gd.setStroke(dp(1), 0x55FFFFFF);
+            b.setBackground(gd);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                b.setElevation(dp(6));
+            }
+
+            b.setOnClickListener(cfg.listener);
+
+            android.widget.FrameLayout.LayoutParams blp = new android.widget.FrameLayout.LayoutParams(btnSz, btnSz);
+            blp.leftMargin = cfg.left;
+            blp.topMargin = cfg.top;
+            circleOverlay.addView(b, blp);
+        }
+
+        circleOverlay.setVisibility(View.VISIBLE);
     }
 
     private void showTimerSelection(final Mode targetMode) {
         menuLayout.removeAllViews();
 
         TextView title = new TextView(this);
-        title.setText(targetMode == Mode.STUDY ? "🎓 选择学习计时方式" : "☕ 选择休闲计时方式");
+        title.setText(targetMode == Mode.STUDY ? "专注计时方式" : "休闲计时方式");
         title.setTextSize(12);
         title.setTextColor(0xFF888899);
         title.setGravity(Gravity.CENTER);
@@ -649,7 +750,7 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
         menuLayout.addView(title);
 
         // 正计时
-        Button countUpBtn = createMenuButton("⏱️ 正向累计计时 (从 00:00 开始)", 0xFF23352B);
+        Button countUpBtn = createMenuButton("正向计时", 0xFF23352B);
         countUpBtn.setTextColor(0xFF88FFB0);
         countUpBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
@@ -701,6 +802,166 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
         menuLayout.addView(noTimerBtn);
 
         menuLayout.setVisibility(View.VISIBLE);
+        ensureMenuInsideScreen();
+    }
+
+    // 确保展开子菜单后整块悬浮窗不超出屏幕左右边缘
+    private void ensureMenuInsideScreen() {
+        if (petContainer == null || windowManager == null) return;
+        petContainer.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        );
+        int w = petContainer.getMeasuredWidth();
+        if (w <= 0) w = petContainer.getWidth();
+        if (w <= 0) w = dp(220); // 兜底按最大卡片宽估算
+
+        int screenW = displayMetrics.widthPixels;
+        int minMargin = dp(8);
+        boolean changed = false;
+
+        // 若右侧超出屏幕边界
+        if (params.x + w > screenW - minMargin) {
+            params.x = Math.max(minMargin, screenW - w - minMargin);
+            changed = true;
+        }
+        // 若左侧跑出屏幕外（比如贴在左边缘时）
+        if (params.x < minMargin) {
+            params.x = minMargin;
+            changed = true;
+        }
+
+        if (changed) {
+            try {
+                windowManager.updateViewLayout(petContainer, params);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private void showMusicMenu() {
+        menuLayout.removeAllViews();
+
+        TextView title = new TextView(this);
+        title.setText("音乐播放控制");
+        title.setTextSize(12);
+        title.setTextColor(0xFFD8B4FE);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, 0, 0, dp(6));
+        menuLayout.addView(title);
+
+        // 1. 打开 TuneFreeNext App
+        Button launchAppBtn = createMenuButton("打开 TuneFreeNext", 0xFF352B42);
+        launchAppBtn.setTextColor(0xFFE9D5FF);
+        launchAppBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                hideMenu();
+                launchTuneFreeNext();
+            }
+        });
+        menuLayout.addView(launchAppBtn);
+
+        // 2. 媒体快捷控制横排 (上一首 | 播放/暂停 | 下一首)
+        LinearLayout ctrlRow = new LinearLayout(this);
+        ctrlRow.setOrientation(LinearLayout.HORIZONTAL);
+        ctrlRow.setGravity(Gravity.CENTER);
+        ctrlRow.setPadding(0, dp(4), 0, dp(4));
+
+        Button prevBtn = new Button(this);
+        prevBtn.setText("上一首");
+        prevBtn.setTextSize(11);
+        prevBtn.setTextColor(0xFFFFFFFF);
+        prevBtn.setBackgroundColor(0xFF2E3342);
+        prevBtn.setPadding(dp(4), dp(6), dp(4), dp(6));
+        LinearLayout.LayoutParams lpPrev = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+        lpPrev.setMargins(dp(2), 0, dp(2), 0);
+        prevBtn.setLayoutParams(lpPrev);
+        prevBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                sendMediaKeyEvent(android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS);
+                showBubble("切到上一首啦 🎶", 1800);
+            }
+        });
+        ctrlRow.addView(prevBtn);
+
+        Button toggleBtn = new Button(this);
+        toggleBtn.setText("播放/暂停");
+        toggleBtn.setTextSize(11);
+        toggleBtn.setTextColor(0xFF88FFB0);
+        toggleBtn.setBackgroundColor(0xFF23352B);
+        toggleBtn.setPadding(dp(4), dp(6), dp(4), dp(6));
+        LinearLayout.LayoutParams lpToggle = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f);
+        lpToggle.setMargins(dp(2), 0, dp(2), 0);
+        toggleBtn.setLayoutParams(lpToggle);
+        toggleBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                sendMediaKeyEvent(android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE);
+                showBubble("音乐播放 / 暂停 🎵", 1800);
+            }
+        });
+        ctrlRow.addView(toggleBtn);
+
+        Button nextBtn = new Button(this);
+        nextBtn.setText("下一首");
+        nextBtn.setTextSize(11);
+        nextBtn.setTextColor(0xFFFFFFFF);
+        nextBtn.setBackgroundColor(0xFF2E3342);
+        nextBtn.setPadding(dp(4), dp(6), dp(4), dp(6));
+        LinearLayout.LayoutParams lpNext = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+        lpNext.setMargins(dp(2), 0, dp(2), 0);
+        nextBtn.setLayoutParams(lpNext);
+        nextBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                sendMediaKeyEvent(android.view.KeyEvent.KEYCODE_MEDIA_NEXT);
+                showBubble("切到下一首啦 🎶", 1800);
+            }
+        });
+        ctrlRow.addView(nextBtn);
+
+        menuLayout.addView(ctrlRow);
+
+        // 3. 返回主菜单
+        Button backBtn = createMenuButton("返回", 0xFF282830);
+        backBtn.setTextSize(11);
+        backBtn.setTextColor(0xFFAAAAAA);
+        backBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                showMainMenu();
+            }
+        });
+        menuLayout.addView(backBtn);
+
+        menuLayout.setVisibility(View.VISIBLE);
+        ensureMenuInsideScreen();
+    }
+
+    private void launchTuneFreeNext() {
+        String pkg = "com.sayqz.tunefreenext.app";
+        Intent intent = getPackageManager().getLaunchIntentForPackage(pkg);
+        if (intent != null) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+            showBubble("为你打开 TuneFreeNext 啦 🎧", 2200);
+        } else {
+            // 备用：尝试通过 intent filter 启动或提示未找到
+            try {
+                Intent custom = new Intent(Intent.ACTION_MAIN);
+                custom.setClassName(pkg, pkg + ".MainActivity");
+                custom.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(custom);
+                showBubble("为你打开 TuneFreeNext 啦 🎧", 2200);
+            } catch (Exception e) {
+                showBubble("未找到 TuneFreeNext 播放器应用哦 🐱", 2500);
+            }
+        }
+    }
+
+    private void sendMediaKeyEvent(int keyCode) {
+        android.media.AudioManager am = (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (am != null) {
+            long now = android.os.SystemClock.uptimeMillis();
+            am.dispatchMediaKeyEvent(new android.view.KeyEvent(now, now, android.view.KeyEvent.ACTION_DOWN, keyCode, 0));
+            am.dispatchMediaKeyEvent(new android.view.KeyEvent(now, now, android.view.KeyEvent.ACTION_UP, keyCode, 0));
+        }
     }
 
     private Button createMenuButton(String text, int bgColor) {
@@ -719,9 +980,16 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
     }
 
     private void hideMenu() {
+        if (circleOverlay != null) {
+            circleOverlay.setVisibility(View.GONE);
+            circleOverlay.removeAllViews();
+        }
         if (menuLayout != null) {
             menuLayout.setVisibility(View.GONE);
             menuLayout.removeAllViews();
+        }
+        if (edgeMode) {
+            snapToEdge();
         }
     }
 

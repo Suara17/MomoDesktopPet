@@ -37,6 +37,12 @@
             </intent-filter>
         </activity>
 
+        <!-- 陪伴时光统计页面 -->
+        <activity
+            android:name=".StatsActivity"
+            android:label="陪伴时光统计"
+            android:exported="false" />
+
         <!-- 桌宠悬浮服务 -->
         <service
             android:name=".PetFloatingService"
