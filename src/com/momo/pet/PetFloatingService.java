@@ -510,14 +510,18 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
                         edgeMode = false; edgeSide = 0;
                         handler.removeCallbacks(longPressRunnable); // 移动则取消长按
                         hideMenu();
+                        if (bubbleView != null) bubbleView.setVisibility(View.GONE); // 拖拽时收起气泡，防止向上遮挡阻碍视线
                         play("drag_smooth", true, null);
-                        showBubble("诶诶？！怎么又拎我领子……放我下来！", 1600);
                     }
                     if (dragging) {
                         long nowDrag = System.currentTimeMillis();
                         if (nowDrag - lastDragUpdateMs >= 16) {
                             params.x = initX + (int) dx;
-                            params.y = initY + (int) dy;
+                            int newY = initY + (int) dy;
+                            // 允许人物一直推到屏幕顶端（但保证墨墨头顶留在屏幕内，不滑入屏幕外部消失）
+                            int minY = -dp(15);
+                            int maxY = displayMetrics.heightPixels - dp(60);
+                            params.y = Math.max(minY, Math.min(newY, maxY));
                             windowManager.updateViewLayout(petContainer, params);
                             lastDragUpdateMs = nowDrag;
                         }
@@ -535,7 +539,7 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
                     if (dragging) {
                         dragging = false;
                         lastInteractMs = System.currentTimeMillis();
-                        int edgeThreshold = dp(24);
+                        int edgeThreshold = dp(28);
                         boolean nearLeft = params.x <= edgeThreshold;
                         boolean nearRight = params.x + petContainer.getWidth() >= displayMetrics.widthPixels - edgeThreshold;
                         if ((nearLeft || nearRight) && actionMap.containsKey("edge_left") && actionMap.containsKey("edge_right")) {
@@ -642,9 +646,13 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
             default: desc = "大只墨墨"; break;
         }
         showBubble("体型切换: " + desc + " 🐱", 2000);
-        playOnce("happy", new Runnable() {
-            @Override public void run() { resumeCurrentMode(); }
-        });
+        if (edgeMode) {
+            play(edgeSide < 0 ? "edge_left" : "edge_right", true, null);
+        } else {
+            playOnce("happy", new Runnable() {
+                @Override public void run() { resumeCurrentMode(); }
+            });
+        }
     }
 
     private void onLongPress() {
