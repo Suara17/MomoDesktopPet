@@ -18,10 +18,10 @@
 
 ## 📦 下载与安装
 
-前往 [Releases 发布页面](https://github.com/Suara17/MomoDesktopPet/releases/tag/v1.0.0) 获取最新产物：
+前往 [Releases 发布页面](https://github.com/Suara17/MomoDesktopPet/releases/tag/v1.5.0) 获取最新产物：
 
-- **开箱即用安装包**：[](https://github.com/Suara17/MomoDesktopPet/releases/download/v1.0.0/MomoDesktopPet.apk)（Android 客户端安装包）
-- **全套动作素材包**：[](https://github.com/Suara17/MomoDesktopPet/releases/download/v1.0.0/Momo_DesktopPet_Assets.zip)（包含 2400+ 帧高清序列帧与 GIF 动图素材）
+- **开箱即用安装包**：[](https://github.com/Suara17/MomoDesktopPet/releases/download/v1.5.0/MomoDesktopPet.apk)（Android 客户端安装包）
+- **全套动作素材包**：[](https://github.com/Suara17/MomoDesktopPet/releases/download/v1.5.0/Momo_DesktopPet_Assets.zip)（包含 2400+ 帧高清序列帧与 GIF 动图素材）
 
 ---
 
