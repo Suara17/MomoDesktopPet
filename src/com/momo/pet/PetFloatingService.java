@@ -89,6 +89,7 @@ public class PetFloatingService extends Service {
     private int timerRemainingSec = 0;
     private int timerElapsedSec = 0;
     private boolean timerRunning = false;
+    private boolean timerPaused = false;
 
     // 当前动画播放状态
     private String currentAction = "idle";
@@ -106,7 +107,19 @@ public class PetFloatingService extends Service {
     private boolean edgeMode = false;
     private int edgeSide = 0; // -1 左侧，1 右侧
     private long touchDownTime = 0;
-    private long lastTapTime = 0;
+    private int tapCount = 0;
+    private final Runnable tapTimeoutRunnable = new Runnable() {
+        @Override
+        public void run() {
+            int count = tapCount;
+            tapCount = 0;
+            if (count == 1) {
+                onSingleTap();
+            } else if (count == 2) {
+                onDoubleTap();
+            }
+        }
+    };
     private boolean hasTriggeredLongPress = false;
 
     // 尺寸档位：迷你(90dp)、小巧(125dp)、标准(160dp)、大只(200dp)
@@ -392,8 +405,8 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
         bubbleView.setBackgroundResource(R.drawable.bg_bubble);
         bubbleView.setTextColor(0xFFFFFFFF);
         bubbleView.setTextSize(13);
-        int maxBubbleWidth = dp(SIZES_DP[sizeIdx] - 10);
-        bubbleView.setMaxWidth(Math.max(dp(120), maxBubbleWidth));
+        int maxBubbleWidth = dp(Math.max(100, SIZES_DP[sizeIdx] - 10));
+        bubbleView.setMaxWidth(maxBubbleWidth);
         bubbleView.setGravity(Gravity.CENTER);
         bubbleView.setLineSpacing(dp(2), 1f);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -542,18 +555,25 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
                         // 如果菜单或环形按钮正开着，点击墨墨则收起菜单
                         if (menuLayout.getVisibility() == View.VISIBLE || circleOverlay.getVisibility() == View.VISIBLE) {
                             hideMenu();
+                            tapCount = 0;
+                            handler.removeCallbacks(tapTimeoutRunnable);
                             return true;
                         }
-                        long now = System.currentTimeMillis();
-                        if (now - lastTapTime < 400) {
-                            onDoubleTap(); lastTapTime = 0;
+
+                        handler.removeCallbacks(tapTimeoutRunnable);
+                        tapCount++;
+
+                        // 只有在计时运行/暂停状态下，三击才触发暂停/继续
+                        if (tapCount == 3) {
+                            tapCount = 0;
+                            if (timerRunning) {
+                                toggleTimerPause();
+                            } else {
+                                // 非计时状态下连击3下当成双击处理
+                                onDoubleTap();
+                            }
                         } else {
-                            lastTapTime = now;
-                            handler.postDelayed(new Runnable() {
-                                @Override public void run() {
-                                    if (lastTapTime != 0) { onSingleTap(); lastTapTime = 0; }
-                                }
-                            }, 400);
+                            handler.postDelayed(tapTimeoutRunnable, 320);
                         }
                     }
                     return true;
@@ -605,8 +625,8 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
             petImageView.setLayoutParams(lp);
         }
         if (bubbleView != null) {
-            int maxBubbleWidth = dp(SIZES_DP[sizeIdx] - 10);
-            bubbleView.setMaxWidth(Math.max(dp(120), maxBubbleWidth));
+            int maxBubbleWidth = dp(Math.max(100, SIZES_DP[sizeIdx] - 10));
+            bubbleView.setMaxWidth(maxBubbleWidth);
         }
         if (edgeMode) {
             snapToEdge();
@@ -698,9 +718,18 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
             }
         }));
 
-        // 5. 若正在计时或在特殊模式，正下方加一个红色的退出圆形按钮（中下）
+        // 5. 若正在计时或在特殊模式，增加【暂停/继续】与【结束】按钮
         if (currentMode != Mode.NORMAL || timerRunning) {
-            list.add(new CornerBtnConfig("结束", (sz - btnSz) / 2, sz - pad - btnSz, 0xEE450A0A, 0xFFFCA5A5, new View.OnClickListener() {
+            String pauseLabel = timerPaused ? "继续" : "暂停";
+            int pauseColor = timerPaused ? 0xFF6EE7B7 : 0xFFFCD34D;
+            list.add(new CornerBtnConfig(pauseLabel, sz / 2 - btnSz - dp(3), sz - pad - btnSz, 0xEE1E293B, pauseColor, new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    toggleTimerPause();
+                    hideMenu();
+                }
+            }));
+
+            list.add(new CornerBtnConfig("结束", sz / 2 + dp(3), sz - pad - btnSz, 0xEE450A0A, 0xFFFCA5A5, new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     switchToNormalMode();
                     hideMenu();
@@ -1048,6 +1077,7 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
 
 private void startTimer() {
         timerRunning = true;
+        timerPaused = false;
         timerView.setVisibility(View.VISIBLE);
         handler.removeCallbacks(timerTickRunnable);
         handler.removeCallbacks(modeBubbleTickRunnable);
@@ -1057,8 +1087,29 @@ private void startTimer() {
     }
     private void stopTimer() {
         timerRunning = false;
+        timerPaused = false;
         handler.removeCallbacks(timerTickRunnable);
         handler.removeCallbacks(modeBubbleTickRunnable);
+    }
+
+    private void toggleTimerPause() {
+        if (!timerRunning) return;
+        timerPaused = !timerPaused;
+        if (timerPaused) {
+            handler.removeCallbacks(timerTickRunnable);
+            handler.removeCallbacks(modeBubbleTickRunnable);
+            updateTimerDisplay();
+            play("daze", true, null);
+            showBubble("⏸ 计时已暂停，稍后再继续吧~", 2200);
+        } else {
+            handler.removeCallbacks(timerTickRunnable);
+            handler.removeCallbacks(modeBubbleTickRunnable);
+            updateTimerDisplay();
+            handler.postDelayed(timerTickRunnable, 1000);
+            handler.postDelayed(modeBubbleTickRunnable, 45000);
+            applyCurrentModeAction();
+            showBubble("▶ 计时继续！墨墨陪着你。", 2000);
+        }
     }
     // 学习/休闲计时期间每45秒陪伴一句，避免频繁打断
     private final Runnable modeBubbleTickRunnable = new Runnable() {
@@ -1074,6 +1125,11 @@ private void startTimer() {
         @Override
         public void run() {
             if (!timerRunning) return;
+
+            // 实时记录陪伴时长（按秒累计入库）
+            if (!timerPaused && (currentMode == Mode.STUDY || currentMode == Mode.LEISURE)) {
+                StatsManager.recordDuration(PetFloatingService.this, currentMode == Mode.STUDY, 1);
+            }
 
             if (isCountDown) {
                 if (timerRemainingSec > 0) {
@@ -1096,11 +1152,16 @@ private void startTimer() {
         int m = sec / 60;
         int s = sec % 60;
         String prefix = currentMode == Mode.STUDY ? "🎓 " : "☕ ";
-        timerView.setText(String.format(Locale.getDefault(), "%s%02d:%02d", prefix, m, s));
-        if (isCountDown && sec <= 60) {
-            timerView.setTextColor(0xFFFF6666); // 最后1分钟变红微警示
+        if (timerPaused) {
+            timerView.setText(String.format(Locale.getDefault(), "%s%02d:%02d ⏸", prefix, m, s));
+            timerView.setTextColor(0xFFFFB703); // 暂停时显示柔和暖橙黄
         } else {
-            timerView.setTextColor(currentMode == Mode.STUDY ? 0xFF00FFA6 : 0xFFFFD166);
+            timerView.setText(String.format(Locale.getDefault(), "%s%02d:%02d", prefix, m, s));
+            if (isCountDown && sec <= 60) {
+                timerView.setTextColor(0xFFFF6666); // 最后1分钟变红微警示
+            } else {
+                timerView.setTextColor(currentMode == Mode.STUDY ? 0xFF00FFA6 : 0xFFFFD166);
+            }
         }
     }
 
@@ -1128,19 +1189,16 @@ private void startTimer() {
     private final Runnable hideBubble = new Runnable() {
         @Override public void run() {
             if (bubbleView != null) bubbleView.setVisibility(View.GONE);
-            // 气泡隐藏会改变 WRAP_CONTENT 容器宽度，重新校正贴边位置
-            if (edgeMode) handler.postDelayed(new Runnable() {
-                @Override public void run() { snapToEdge(); }
-            }, 40);
         }
     };
     private void snapToEdge() {
         if (!edgeMode || petContainer == null || windowManager == null) return;
-        petContainer.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-        int w = petContainer.getMeasuredWidth();
-        if (w <= 0) w = petContainer.getWidth();
-        params.x = edgeSide < 0 ? 0 : Math.max(0, displayMetrics.widthPixels - w);
+        int sz = dp(SIZES_DP[sizeIdx]);
+        if (edgeSide < 0) {
+            params.x = 0;
+        } else {
+            params.x = Math.max(0, displayMetrics.widthPixels - sz);
+        }
         try { windowManager.updateViewLayout(petContainer, params); } catch (Exception ignored) {}
     }
 
