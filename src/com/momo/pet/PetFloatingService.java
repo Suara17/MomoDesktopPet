@@ -52,6 +52,7 @@ public class PetFloatingService extends Service {
     private View petContainer;
     private ImageView petImageView;
     private TextView bubbleView;
+    private WindowManager.LayoutParams bubbleParams;
     private TextView timerView;
     private LinearLayout menuLayout;
     private android.widget.FrameLayout circleOverlay;
@@ -271,6 +272,9 @@ public class PetFloatingService extends Service {
         if (petContainer != null && windowManager != null) {
             try { windowManager.removeView(petContainer); } catch (Exception ignored) {}
         }
+        if (bubbleView != null && windowManager != null && bubbleView.isAttachedToWindow()) {
+            try { windowManager.removeView(bubbleView); } catch (Exception ignored) {}
+        }
         SoundManager.getInstance(this).release();
         releaseWakeLock();
         scheduleRestart();
@@ -422,27 +426,25 @@ public class PetFloatingService extends Service {
         timerView.setLayoutParams(tp);
         container.addView(timerView);
 
-        // 2. 头顶气泡 (Bubble View)
+        // 2. 独立智能定位气泡 (Bubble View)
         bubbleView = new TextView(this);
         bubbleView.setBackgroundResource(R.drawable.bg_bubble);
         bubbleView.setTextColor(0xFFFFFFFF);
         bubbleView.setTextSize(13);
-        int maxBubbleWidth = dp(Math.max(100, SIZES_DP[sizeIdx] - 10));
-        bubbleView.setMaxWidth(maxBubbleWidth);
         bubbleView.setGravity(Gravity.CENTER);
         bubbleView.setLineSpacing(dp(2), 1f);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            bubbleView.setElevation(dp(6));
+            bubbleView.setElevation(dp(8));
         }
         bubbleView.setVisibility(View.GONE);
-        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
+        bubbleParams = new WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
         );
-        bp.gravity = Gravity.CENTER_HORIZONTAL;
-        bp.bottomMargin = dp(4);
-        bubbleView.setLayoutParams(bp);
-        container.addView(bubbleView);
+        bubbleParams.gravity = Gravity.TOP | Gravity.START;
 
         // 3. 角色动画主图
         petImageView = new ImageView(this);
@@ -532,7 +534,7 @@ public class PetFloatingService extends Service {
                         edgeMode = false; edgeSide = 0;
                         handler.removeCallbacks(longPressRunnable); // 移动则取消长按
                         hideMenu();
-                        if (bubbleView != null) bubbleView.setVisibility(View.GONE); // 拖拽时收起气泡，防止向上遮挡阻碍视线
+                        hideBubbleImmediately(); // 拖拽时收起气泡，防止向上遮挡阻碍视线
                         SoundManager.getInstance(PetFloatingService.this).play("drag");
                         play("drag_smooth", true, null);
                     }
@@ -617,7 +619,7 @@ public class PetFloatingService extends Service {
         // 如果当前正弹着防沉迷超时提醒气泡，点击墨墨立刻收起该提醒
         if (isWarningBubbleActive) {
             isWarningBubbleActive = false;
-            if (bubbleView != null) bubbleView.setVisibility(View.GONE);
+            hideBubbleImmediately();
             SoundManager.getInstance(this).play("tap");
             showBubble("好啦，知道你看到提醒了。那快休息下吧~ 🐱", 2200);
             return;
@@ -673,8 +675,7 @@ public class PetFloatingService extends Service {
             petImageView.setLayoutParams(lp);
         }
         if (bubbleView != null) {
-            int maxBubbleWidth = dp(Math.max(100, SIZES_DP[sizeIdx] - 10));
-            bubbleView.setMaxWidth(maxBubbleWidth);
+            // bubbleView 不受体型缩放直接限制，独立按屏幕计算自适应宽度
         }
         if (edgeMode) {
             snapToEdge();
@@ -1117,9 +1118,18 @@ public class PetFloatingService extends Service {
     }
 
     private void switchToNormalMode() {
+        boolean wasTiming = timerRunning || currentMode != Mode.NORMAL;
         currentMode = Mode.NORMAL;
         stopTimer();
         timerView.setVisibility(View.GONE);
+        if (wasTiming) {
+            SoundManager.getInstance(this).play("finish");
+            // 手动结束计时：清晰两连震（300ms, 250ms）
+            vibratePattern(
+                new long[]{0, 300, 150, 250},
+                new int[]{0, 255, 0, 255}
+            );
+        }
         play("idle", true, null);
         showBubble("已恢复自由待机模式~ (。•̀ᴗ-)✧", 2000);
     }
@@ -1138,10 +1148,11 @@ public class PetFloatingService extends Service {
         applyCurrentModeAction();
     }
 
-private void startTimer() {
+    private void startTimer() {
         timerRunning = true;
         timerPaused = false;
         timerView.setVisibility(View.VISIBLE);
+        SoundManager.getInstance(this).play("start");
         handler.removeCallbacks(timerTickRunnable);
         handler.removeCallbacks(modeBubbleTickRunnable);
         updateTimerDisplay();
@@ -1233,6 +1244,11 @@ private void startTimer() {
         stopTimer();
         timerView.setVisibility(View.GONE);
         SoundManager.getInstance(this).play("finish");
+        // 倒计时自然结束：明显饱满的强劲两连跳 (350ms, 400ms)
+        vibratePattern(
+            new long[]{0, 350, 150, 400},
+            new int[]{0, 255, 0, 255}
+        );
         String msg = currentMode == Mode.STUDY
             ? "叮！专注时间到啦！很棒哦，站起来喝口水伸个懒腰吧 🎉"
             : "叮！休闲时间结束啦，感觉电量充满了吗？(。•̀ᴗ-)✧";
@@ -1244,14 +1260,14 @@ private void startTimer() {
         });
     }
 
-    // ── 气泡 ─────────────────────────────────────────────────────
+    // ── 气泡智能定位与展示 ─────────────────────────────────────────────────────
     private void showBubble(String text, int ms) {
-        if (bubbleView == null) return;
+        if (bubbleView == null || windowManager == null) return;
         isWarningBubbleActive = false;
         bubbleView.setBackgroundResource(R.drawable.bg_bubble);
         bubbleView.setTextColor(0xFFFFFFFF);
         bubbleView.setText(text);
-        bubbleView.setVisibility(View.VISIBLE);
+        displayBubbleSmartly();
         handler.removeCallbacks(hideBubble);
         if (ms > 0) {
             handler.postDelayed(hideBubble, ms);
@@ -1260,7 +1276,7 @@ private void startTimer() {
 
     // 专属防沉迷强调提醒气泡（强调边框与高亮底色，默认不自动消失，直到用户点击墨墨）
     private void showWarningBubble(String text, int stage) {
-        if (bubbleView == null) return;
+        if (bubbleView == null || windowManager == null) return;
         isWarningBubbleActive = true;
         handler.removeCallbacks(hideBubble); // 取消自动隐藏定时器，常驻显示
 
@@ -1281,13 +1297,74 @@ private void startTimer() {
 
         bubbleView.setBackground(gd);
         bubbleView.setText(text);
+        displayBubbleSmartly();
+    }
+
+    private void displayBubbleSmartly() {
+        if (bubbleView == null || windowManager == null || petContainer == null) return;
+
+        int screenW = displayMetrics.widthPixels;
+        int screenH = displayMetrics.heightPixels;
+        int margin = dp(12);
+        int maxW = Math.min(dp(260), screenW - margin * 2);
+        bubbleView.setMaxWidth(maxW);
+
+        // 测量气泡尺寸
+        bubbleView.measure(
+            View.MeasureSpec.makeMeasureSpec(maxW, View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        );
+        int bubbleW = bubbleView.getMeasuredWidth();
+        int bubbleH = bubbleView.getMeasuredHeight();
+        int petSz = dp(SIZES_DP[sizeIdx]);
+
+        // 水平方向：以人物中心为基准居中对齐，边缘不溢出屏幕
+        int petCenterX = params.x + petSz / 2;
+        int targetX = petCenterX - bubbleW / 2;
+        targetX = Math.max(margin, Math.min(targetX, screenW - bubbleW - margin));
+
+        // 垂直方向：优先放置于人物头顶（距离人物 8dp）
+        // 若人物太靠近屏幕顶部（头顶放不下），智能翻转至人物脚下（下方展示）
+        int targetY;
+        int topCandidateY = params.y - bubbleH - dp(8);
+        int safeTopY = dp(28); // 避开状态栏顶部区域
+        if (topCandidateY >= safeTopY) {
+            targetY = topCandidateY;
+        } else {
+            // 头顶放不下，智能放置在人物下方
+            targetY = params.y + petSz + dp(8);
+            // 确保底部不超出屏幕
+            if (targetY + bubbleH > screenH - margin) {
+                targetY = screenH - bubbleH - margin;
+            }
+        }
+
+        bubbleParams.x = targetX;
+        bubbleParams.y = targetY;
         bubbleView.setVisibility(View.VISIBLE);
+
+        try {
+            if (bubbleView.isAttachedToWindow()) {
+                windowManager.updateViewLayout(bubbleView, bubbleParams);
+            } else {
+                windowManager.addView(bubbleView, bubbleParams);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void hideBubbleImmediately() {
+        isWarningBubbleActive = false;
+        handler.removeCallbacks(hideBubble);
+        if (bubbleView != null && windowManager != null && bubbleView.isAttachedToWindow()) {
+            try {
+                windowManager.removeView(bubbleView);
+            } catch (Exception ignored) {}
+        }
     }
 
     private final Runnable hideBubble = new Runnable() {
         @Override public void run() {
-            isWarningBubbleActive = false;
-            if (bubbleView != null) bubbleView.setVisibility(View.GONE);
+            hideBubbleImmediately();
         }
     };
     private void snapToEdge() {
@@ -1503,6 +1580,11 @@ private void startTimer() {
     private void triggerUsageWarning(String appName, int minutes, int stage) {
         SoundManager.getInstance(this).play("alert");
         if (stage == 1) {
+            // 初次提醒：饱满有力的双脉冲震动 (400ms, 400ms)
+            vibratePattern(
+                new long[]{0, 400, 200, 400},
+                new int[]{0, 255, 0, 255}
+            );
             // 轻度提醒：curious / daze
             playOnce("curious", new Runnable() {
                 @Override public void run() { resumeCurrentMode(); }
@@ -1514,6 +1596,11 @@ private void startTimer() {
             };
             showWarningBubble(quotes[random.nextInt(quotes.length)], 1);
         } else {
+            // 严重超时：强烈三连急促警示重震 (450ms, 450ms, 600ms)
+            vibratePattern(
+                new long[]{0, 450, 150, 450, 150, 600},
+                new int[]{0, 255, 0, 255, 0, 255}
+            );
             // 严重超时提醒：angry / daze
             playOnce("angry", new Runnable() {
                 @Override public void run() { resumeCurrentMode(); }
@@ -1525,6 +1612,41 @@ private void startTimer() {
             };
             showWarningBubble(severeQuotes[random.nextInt(severeQuotes.length)], 2);
         }
+    }
+
+    private void vibratePattern(long[] pattern, int[] amplitudes) {
+        try {
+            android.os.Vibrator vibrator = (android.os.Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (vibrator == null || !vibrator.hasVibrator()) return;
+
+            android.media.AudioAttributes audioAttributes = null;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                audioAttributes = new android.media.AudioAttributes.Builder()
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                    .build();
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                android.os.VibrationEffect effect;
+                if (amplitudes != null && vibrator.hasAmplitudeControl()) {
+                    effect = android.os.VibrationEffect.createWaveform(pattern, amplitudes, -1);
+                } else {
+                    effect = android.os.VibrationEffect.createWaveform(pattern, -1);
+                }
+                if (audioAttributes != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    vibrator.vibrate(effect, audioAttributes);
+                } else {
+                    vibrator.vibrate(effect);
+                }
+            } else {
+                if (audioAttributes != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    vibrator.vibrate(pattern, -1, audioAttributes);
+                } else {
+                    vibrator.vibrate(pattern, -1);
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     @Override

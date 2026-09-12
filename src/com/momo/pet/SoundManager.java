@@ -65,6 +65,7 @@ public class SoundManager {
             loadSound("snap", R.raw.sfx_snap);
             loadSound("menu", R.raw.sfx_menu);
             loadSound("pause", R.raw.sfx_pause);
+            loadSound("start", R.raw.sfx_start);
             loadSound("finish", R.raw.sfx_finish);
             loadSound("alert", R.raw.sfx_alert);
 
