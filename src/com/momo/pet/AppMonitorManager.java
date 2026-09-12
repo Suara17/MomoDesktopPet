@@ -1,19 +1,26 @@
 package com.momo.pet;
 
 import android.app.AppOpsManager;
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.Process;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 public class AppMonitorManager {
     private static final String PREF_NAME = "momo_app_monitor";
     private static final String KEY_ENABLED = "monitor_enabled";
-    private static final String KEY_LIMIT_MINS = "limit_mins";
+    private static final String KEY_LIMIT_MINS = "limit_mins"; // 全局单次连续限制 (分钟)
+    private static final String KEY_DAILY_LIMIT_MINS = "daily_limit_mins"; // 全局今日累计限制 (分钟，默认 120 分钟)
     private static final String KEY_MONITOR_ALL = "monitor_all";
     private static final String KEY_PACKAGE_SET = "package_set";
+    private static final String PREFIX_APP_DAILY_LIMIT = "daily_limit_pkg_"; // 单个 App 独立配置今日累计限制
 
     // 默认关照应用清单（常见视频、社交、娱乐、资讯类）
     public static final String[] DEFAULT_PACKAGES = {
@@ -61,7 +68,7 @@ public class AppMonitorManager {
             .edit().putBoolean(KEY_ENABLED, enabled).commit();
     }
 
-    // 单次连续使用时长阈值（分钟，默认 30 分钟）
+    // 单次连续使用时长全局默认阈值（分钟，默认 30 分钟）
     public static int getLimitMinutes(Context context) {
         if (context == null) return 30;
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -72,6 +79,78 @@ public class AppMonitorManager {
         if (context == null) return;
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             .edit().putInt(KEY_LIMIT_MINS, Math.max(5, mins)).commit();
+    }
+
+    // 全局今日累计使用时长默认阈值（分钟，默认 120 分钟）
+    public static int getGlobalDailyLimitMinutes(Context context) {
+        if (context == null) return 120;
+        return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getInt(KEY_DAILY_LIMIT_MINS, 120);
+    }
+
+    public static void setGlobalDailyLimitMinutes(Context context, int mins) {
+        if (context == null) return;
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_DAILY_LIMIT_MINS, Math.max(10, mins)).commit();
+    }
+
+    // 获取某个特定应用的今日累计使用阈值（分钟；若未单独设置，则返回全局阈值）
+    public static int getAppDailyLimitMinutes(Context context, String pkg) {
+        if (context == null || pkg == null) return getGlobalDailyLimitMinutes(context);
+        SharedPreferences sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        int val = sp.getInt(PREFIX_APP_DAILY_LIMIT + pkg, -1);
+        if (val > 0) return val;
+        return getGlobalDailyLimitMinutes(context);
+    }
+
+    // 检查某个应用是否单独配置了累计时长
+    public static boolean hasCustomDailyLimit(Context context, String pkg) {
+        if (context == null || pkg == null) return false;
+        SharedPreferences sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        return sp.getInt(PREFIX_APP_DAILY_LIMIT + pkg, -1) > 0;
+    }
+
+    // 设置某个特定应用的今日累计使用阈值（若 <= 0 表示使用全局默认值）
+    public static void setAppDailyLimitMinutes(Context context, String pkg, int mins) {
+        if (context == null || pkg == null) return;
+        SharedPreferences.Editor ed = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).edit();
+        if (mins <= 0) {
+            ed.remove(PREFIX_APP_DAILY_LIMIT + pkg);
+        } else {
+            ed.putInt(PREFIX_APP_DAILY_LIMIT + pkg, mins);
+        }
+        ed.commit();
+    }
+
+    // 查询该应用今天从 00:00 到当前时间的原生前台累计总使用时长 (分钟)
+    public static int getAppTodayUsedMinutes(Context context, String pkg) {
+        if (context == null || pkg == null) return 0;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return 0;
+        try {
+            UsageStatsManager usm = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usm == null) return 0;
+
+            Calendar cal = Calendar.getInstance();
+            cal.set(Calendar.HOUR_OF_DAY, 0);
+            cal.set(Calendar.MINUTE, 0);
+            cal.set(Calendar.SECOND, 0);
+            cal.set(Calendar.MILLISECOND, 0);
+            long startToday = cal.getTimeInMillis();
+            long now = System.currentTimeMillis();
+
+            List<UsageStats> statsList = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startToday, now);
+            if (statsList == null || statsList.isEmpty()) return 0;
+
+            long totalMs = 0;
+            for (UsageStats us : statsList) {
+                if (pkg.equals(us.getPackageName())) {
+                    totalMs += us.getTotalTimeInForeground();
+                }
+            }
+            return (int) (totalMs / 60000);
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     // 是否对所有第三方应用生效（true: 任何App超过阈值都提醒；false: 仅监控列表内的App）
@@ -100,11 +179,18 @@ public class AppMonitorManager {
     }
 
     public static void addPackage(Context context, String pkg) {
+        addPackage(context, pkg, 0);
+    }
+
+    public static void addPackage(Context context, String pkg, int customDailyLimitMins) {
         if (context == null || pkg == null) return;
         Set<String> set = getMonitoredPackages(context);
         set.add(pkg.trim());
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             .edit().putStringSet(KEY_PACKAGE_SET, set).commit();
+        if (customDailyLimitMins > 0) {
+            setAppDailyLimitMinutes(context, pkg, customDailyLimitMins);
+        }
     }
 
     public static void removePackage(Context context, String pkg) {
@@ -112,7 +198,10 @@ public class AppMonitorManager {
         Set<String> set = getMonitoredPackages(context);
         set.remove(pkg.trim());
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            .edit().putStringSet(KEY_PACKAGE_SET, set).commit();
+            .edit()
+            .putStringSet(KEY_PACKAGE_SET, set)
+            .remove(PREFIX_APP_DAILY_LIMIT + pkg)
+            .commit();
     }
 
     // 判断某个包名是否应该被监控

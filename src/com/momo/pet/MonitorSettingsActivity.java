@@ -31,6 +31,7 @@ public class MonitorSettingsActivity extends Activity {
     private Switch swEnableMonitor;
     private Switch swMonitorAll;
     private TextView tvLimitVal;
+    private TextView tvDailyLimitVal;
     private LinearLayout pkgListContainer;
     private TextView tvPermissionStatus;
     private Button btnGrantPermission;
@@ -94,68 +95,66 @@ public class MonitorSettingsActivity extends Activity {
         root.addView(topBar);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("“一个 App 玩太久了，墨墨会悄悄探头吐槽你哦。” 🐱");
+        subtitle.setText("“单次沉迷、今日累计摸鱼，墨墨都会悄悄探头提醒你哦。” 🐱");
         subtitle.setTextSize(13);
         subtitle.setTextColor(0xFF8A827A);
         subtitle.setPadding(dp(4), 0, dp(4), dp(16));
         root.addView(subtitle);
 
-        // 2. 权限状态引导卡片
+        // 2. 权限状态警示卡片
         LinearLayout permCard = new LinearLayout(this);
         permCard.setOrientation(LinearLayout.VERTICAL);
         permCard.setBackground(makeRoundedCard(0xFFFFFFFF, 16));
-        permCard.setPadding(dp(16), dp(16), dp(16), dp(16));
+        permCard.setPadding(dp(16), dp(14), dp(16), dp(14));
         permCard.setElevation(dp(2));
 
-        TextView permTitle = new TextView(this);
-        permTitle.setText("🔑 系统使用情况权限");
-        permTitle.setTextSize(14);
-        permTitle.setTypeface(null, Typeface.BOLD);
-        permTitle.setTextColor(0xFF4A443E);
-        permCard.addView(permTitle);
-
         tvPermissionStatus = new TextView(this);
-        tvPermissionStatus.setTextSize(12);
-        tvPermissionStatus.setPadding(0, dp(6), 0, dp(10));
+        tvPermissionStatus.setTextSize(13);
+        tvPermissionStatus.setLineSpacing(dp(2), 1.1f);
         permCard.addView(tvPermissionStatus);
 
         btnGrantPermission = new Button(this);
-        btnGrantPermission.setText("去系统开启【有权查看使用情况的应用】");
+        btnGrantPermission.setText("去系统设置开启「查看使用情况」权限 ➔");
         btnGrantPermission.setTextSize(13);
         btnGrantPermission.setTextColor(0xFFFFFFFF);
-        btnGrantPermission.setBackground(makeRoundedCard(0xFF2E3842, 12));
-        btnGrantPermission.setPadding(dp(12), dp(10), dp(12), dp(10));
+        btnGrantPermission.setBackground(makeRoundedCard(0xFFF59E0B, 10));
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        blp.topMargin = dp(10);
+        btnGrantPermission.setLayoutParams(blp);
         btnGrantPermission.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 try {
                     Intent intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
                     startActivity(intent);
                 } catch (Exception e) {
-                    Toast.makeText(MonitorSettingsActivity.this, "无法自动打开设置，请在手机系统设置搜索【有权查看使用情况】", Toast.LENGTH_LONG).show();
+                    Toast.makeText(MonitorSettingsActivity.this, "无法自动打开设置页，请在系统设置中搜索「有权查看使用情况的应用」", Toast.LENGTH_LONG).show();
                 }
             }
         });
         permCard.addView(btnGrantPermission);
         root.addView(permCard);
 
-        // 3. 基础参数控制卡片 (开关、时长阈值)
         View space1 = new View(this);
         space1.setLayoutParams(new LinearLayout.LayoutParams(1, dp(16)));
         root.addView(space1);
 
+        // 3. 全局防沉迷规则卡片
         LinearLayout controlCard = new LinearLayout(this);
         controlCard.setOrientation(LinearLayout.VERTICAL);
         controlCard.setBackground(makeRoundedCard(0xFFFFFFFF, 16));
         controlCard.setPadding(dp(16), dp(16), dp(16), dp(16));
         controlCard.setElevation(dp(2));
 
-        // 总开关
+        // 主开关
         LinearLayout row1 = new LinearLayout(this);
         row1.setOrientation(LinearLayout.HORIZONTAL);
         row1.setGravity(Gravity.CENTER_VERTICAL);
         TextView tv1 = new TextView(this);
-        tv1.setText("启用墨墨防沉迷提醒");
-        tv1.setTextSize(14);
+        tv1.setText("启用防沉迷前台守护");
+        tv1.setTextSize(15);
+        tv1.setTypeface(null, Typeface.BOLD);
         tv1.setTextColor(0xFF33302C);
         row1.addView(tv1, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
 
@@ -176,7 +175,7 @@ public class MonitorSettingsActivity extends Activity {
         dlp1.setMargins(0, dp(12), 0, dp(12));
         controlCard.addView(div1, dlp1);
 
-        // 时长阈值设置行
+        // 单次连续使用时长
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
         row2.setGravity(Gravity.CENTER_VERTICAL);
@@ -213,6 +212,56 @@ public class MonitorSettingsActivity extends Activity {
         LinearLayout.LayoutParams dlp2 = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
         dlp2.setMargins(0, dp(12), 0, dp(12));
         controlCard.addView(div2, dlp2);
+
+        // 全局今日累计使用时长默认阈值
+        LinearLayout rowDaily = new LinearLayout(this);
+        rowDaily.setOrientation(LinearLayout.HORIZONTAL);
+        rowDaily.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout rowDailyText = new LinearLayout(this);
+        rowDailyText.setOrientation(LinearLayout.VERTICAL);
+
+        TextView tvDailyTitle = new TextView(this);
+        tvDailyTitle.setText("今日累计使用提醒上限 (全局默认)");
+        tvDailyTitle.setTextSize(14);
+        tvDailyTitle.setTextColor(0xFF33302C);
+        rowDailyText.addView(tvDailyTitle);
+
+        TextView tvDailySub = new TextView(this);
+        tvDailySub.setText("未单独配置的应用将默认采用此累计上限");
+        tvDailySub.setTextSize(11);
+        tvDailySub.setTextColor(0xFF8A827A);
+        rowDailyText.addView(tvDailySub);
+
+        rowDaily.addView(rowDailyText, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+
+        tvDailyLimitVal = new TextView(this);
+        int gDaily = AppMonitorManager.getGlobalDailyLimitMinutes(this);
+        tvDailyLimitVal.setText(formatMins(gDaily));
+        tvDailyLimitVal.setTextSize(14);
+        tvDailyLimitVal.setTextColor(0xFFF59E0B);
+        tvDailyLimitVal.setTypeface(null, Typeface.BOLD);
+        tvDailyLimitVal.setPadding(0, 0, dp(10), 0);
+        rowDaily.addView(tvDailyLimitVal);
+
+        Button btnChangeDailyLimit = new Button(this);
+        btnChangeDailyLimit.setText("修改");
+        btnChangeDailyLimit.setTextSize(12);
+        btnChangeDailyLimit.setTextColor(0xFF5A5550);
+        btnChangeDailyLimit.setBackground(makeRoundedCard(0xFFEFEAE4, 10));
+        btnChangeDailyLimit.setPadding(dp(10), dp(4), dp(10), dp(4));
+        btnChangeDailyLimit.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                showGlobalDailyLimitPickerDialog();
+            }
+        });
+        rowDaily.addView(btnChangeDailyLimit);
+        controlCard.addView(rowDaily);
+
+        View div3 = new View(this);
+        div3.setBackgroundColor(0xFFF3EFEA);
+        LinearLayout.LayoutParams dlp3 = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
+        dlp3.setMargins(0, dp(12), 0, dp(12));
+        controlCard.addView(div3, dlp3);
 
         // 监控范围模式 (全部应用 vs 重点关照清单)
         LinearLayout row3 = new LinearLayout(this);
@@ -263,7 +312,7 @@ public class MonitorSettingsActivity extends Activity {
         listHeader.setPadding(0, 0, 0, dp(12));
 
         TextView listTitle = new TextView(this);
-        listTitle.setText("📋 重点关照应用清单");
+        listTitle.setText("📋 重点关照清单 (支持独立配置)");
         listTitle.setTextSize(14);
         listTitle.setTypeface(null, Typeface.BOLD);
         listTitle.setTextColor(0xFF4A443E);
@@ -304,6 +353,12 @@ public class MonitorSettingsActivity extends Activity {
         swMonitorAll.setEnabled(enabled);
     }
 
+    private String formatMins(int mins) {
+        if (mins < 60) return mins + " 分钟";
+        if (mins % 60 == 0) return (mins / 60) + " 小时";
+        return String.format(java.util.Locale.getDefault(), "%.1f 小时", mins / 60.0f);
+    }
+
     private void updatePermissionDisplay() {
         boolean hasPerm = AppMonitorManager.hasUsageStatsPermission(this);
         if (hasPerm) {
@@ -341,6 +396,61 @@ public class MonitorSettingsActivity extends Activity {
             .show();
     }
 
+    private void showGlobalDailyLimitPickerDialog() {
+        final int[] options = {30, 45, 60, 90, 120, 150, 180, 240};
+        String[] items = new String[options.length];
+        int current = AppMonitorManager.getGlobalDailyLimitMinutes(this);
+        int checkedItem = 4;
+        for (int i = 0; i < options.length; i++) {
+            items[i] = formatMins(options[i]);
+            if (options[i] == current) checkedItem = i;
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("选择全局今日累计上限")
+            .setSingleChoiceItems(items, checkedItem, new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) {
+                    AppMonitorManager.setGlobalDailyLimitMinutes(MonitorSettingsActivity.this, options[which]);
+                    tvDailyLimitVal.setText(formatMins(options[which]));
+                    renderPackageList();
+                    dialog.dismiss();
+                    Toast.makeText(MonitorSettingsActivity.this, "全局今日累计已设定为 " + formatMins(options[which]), Toast.LENGTH_SHORT).show();
+                }
+            })
+            .setNegativeButton("取消", null)
+            .show();
+    }
+
+    private void showAppDailyLimitDialog(final String appName, final String pkg) {
+        final int[] options = {0, 30, 45, 60, 90, 120, 150, 180, 240};
+        String[] items = new String[options.length];
+        int gVal = AppMonitorManager.getGlobalDailyLimitMinutes(this);
+        items[0] = "跟随全局默认 (" + formatMins(gVal) + ")";
+        int curVal = AppMonitorManager.hasCustomDailyLimit(this, pkg)
+            ? AppMonitorManager.getAppDailyLimitMinutes(this, pkg)
+            : 0;
+        int checkedItem = 0;
+        for (int i = 1; i < options.length; i++) {
+            items[i] = formatMins(options[i]);
+            if (options[i] == curVal) checkedItem = i;
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("「" + appName + "」今日累计上限配置")
+            .setSingleChoiceItems(items, checkedItem, new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) {
+                    int chosen = options[which];
+                    AppMonitorManager.setAppDailyLimitMinutes(MonitorSettingsActivity.this, pkg, chosen);
+                    renderPackageList();
+                    dialog.dismiss();
+                    String tip = chosen <= 0 ? "已恢复跟随全局默认" : ("已单独设定累计上限为 " + formatMins(chosen));
+                    Toast.makeText(MonitorSettingsActivity.this, tip, Toast.LENGTH_SHORT).show();
+                }
+            })
+            .setNegativeButton("取消", null)
+            .show();
+    }
+
     private void renderPackageList() {
         pkgListContainer.removeAllViews();
         PackageManager pm = getPackageManager();
@@ -363,35 +473,63 @@ public class MonitorSettingsActivity extends Activity {
                 appName = pm.getApplicationLabel(info).toString();
             } catch (Exception ignored) {}
 
+            final String finalAppName = appName;
+            boolean hasCustom = AppMonitorManager.hasCustomDailyLimit(this, pkg);
+            int appLimit = AppMonitorManager.getAppDailyLimitMinutes(this, pkg);
+            int todayUsed = AppMonitorManager.getAppTodayUsedMinutes(this, pkg);
+
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(0, dp(8), 0, dp(8));
+            row.setPadding(0, dp(10), 0, dp(10));
 
             LinearLayout infoCol = new LinearLayout(this);
             infoCol.setOrientation(LinearLayout.VERTICAL);
 
             TextView tvName = new TextView(this);
             tvName.setText(appName);
-            tvName.setTextSize(13);
+            tvName.setTextSize(14);
             tvName.setTextColor(0xFF33302C);
             tvName.setTypeface(null, Typeface.BOLD);
             infoCol.addView(tvName);
 
-            TextView tvPkg = new TextView(this);
-            tvPkg.setText(pkg);
-            tvPkg.setTextSize(10);
-            tvPkg.setTextColor(0xFF8A827A);
-            infoCol.addView(tvPkg);
+            TextView tvStats = new TextView(this);
+            String limitDesc = hasCustom
+                ? ("今日限额: " + formatMins(appLimit) + " [独配]")
+                : ("今日限额: " + formatMins(appLimit) + " [默认]");
+            tvStats.setText("今日已用 " + formatMins(todayUsed) + " · " + limitDesc);
+            tvStats.setTextSize(11);
+            tvStats.setTextColor(todayUsed >= appLimit ? 0xFFEF4444 : 0xFF8A827A);
+            tvStats.setPadding(0, dp(2), 0, 0);
+            infoCol.addView(tvStats);
 
             row.addView(infoCol, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
 
+            // 配置限额按钮
+            Button cfgBtn = new Button(this);
+            cfgBtn.setText(hasCustom ? "修改限额" : "设置限额");
+            cfgBtn.setTextSize(11);
+            cfgBtn.setTextColor(0xFF14B8A6);
+            cfgBtn.setBackground(makeBorderCard(0xFFF0FDF4, 0xFF86EFAC, 8, 1));
+            cfgBtn.setPadding(dp(8), dp(3), dp(8), dp(3));
+            cfgBtn.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    showAppDailyLimitDialog(finalAppName, pkg);
+                }
+            });
+            row.addView(cfgBtn);
+
+            View spaceBtn = new View(this);
+            spaceBtn.setLayoutParams(new LinearLayout.LayoutParams(dp(6), 1));
+            row.addView(spaceBtn);
+
+            // 移除按钮
             Button delBtn = new Button(this);
             delBtn.setText("移除");
             delBtn.setTextSize(11);
             delBtn.setTextColor(0xFFEF4444);
             delBtn.setBackground(makeRoundedCard(0xFFFEE2E2, 8));
-            delBtn.setPadding(dp(8), dp(2), dp(8), dp(2));
+            delBtn.setPadding(dp(8), dp(3), dp(8), dp(3));
             delBtn.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     AppMonitorManager.removePackage(MonitorSettingsActivity.this, pkg);
@@ -417,7 +555,6 @@ public class MonitorSettingsActivity extends Activity {
         List<ApplicationInfo> apps = pm.getInstalledApplications(0);
         for (ApplicationInfo ai : apps) {
             if (ai.packageName.equals(myPkg)) continue;
-            // 排除无启动图标的纯底层系统组件，优先保留用户可见的 App
             boolean isSys = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
             boolean isUpdatedSys = (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
             boolean hasLaunchIntent = pm.getLaunchIntentForPackage(ai.packageName) != null;
@@ -435,7 +572,7 @@ public class MonitorSettingsActivity extends Activity {
             }
         });
 
-        // 2. 自定义带实时搜索框与滚动的现代化弹窗
+        // 2. 自定义带实时搜索框与滚动的弹窗
         LinearLayout dialogRoot = new LinearLayout(this);
         dialogRoot.setOrientation(LinearLayout.VERTICAL);
         dialogRoot.setPadding(dp(18), dp(16), dp(18), dp(16));
@@ -508,10 +645,9 @@ public class MonitorSettingsActivity extends Activity {
                         addBtn.setPadding(dp(8), dp(2), dp(8), dp(2));
                         addBtn.setOnClickListener(new View.OnClickListener() {
                             @Override public void onClick(View v) {
-                                AppMonitorManager.addPackage(MonitorSettingsActivity.this, item.pkg);
-                                renderPackageList();
-                                Toast.makeText(MonitorSettingsActivity.this, "已将「" + item.name + "」加入守护清单", Toast.LENGTH_SHORT).show();
                                 dialog.dismiss();
+                                // 添加时顺带弹窗询问是否单独配置该应用的累计限额
+                                showAddConfirmWithDailyLimit(item.name, item.pkg);
                             }
                         });
                         row.addView(addBtn);
@@ -543,9 +679,39 @@ public class MonitorSettingsActivity extends Activity {
             @Override public void afterTextChanged(android.text.Editable s) {}
         });
 
-        // 初始填充列表
         filterRunnable.run();
         dialog.show();
+    }
+
+    private void showAddConfirmWithDailyLimit(final String appName, final String pkg) {
+        final int[] options = {0, 30, 45, 60, 90, 120, 150, 180, 240};
+        String[] items = new String[options.length];
+        int gVal = AppMonitorManager.getGlobalDailyLimitMinutes(this);
+        items[0] = "跟随全局默认 (" + formatMins(gVal) + ")";
+        for (int i = 1; i < options.length; i++) {
+            items[i] = formatMins(options[i]);
+        }
+
+        final int[] selected = {0};
+        new AlertDialog.Builder(this)
+            .setTitle("为「" + appName + "」设定今日累计上限")
+            .setSingleChoiceItems(items, 0, new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface d, int which) {
+                    selected[0] = options[which];
+                }
+            })
+            .setPositiveButton("确认添加", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface d, int which) {
+                    AppMonitorManager.addPackage(MonitorSettingsActivity.this, pkg, selected[0]);
+                    renderPackageList();
+                    String msg = selected[0] <= 0
+                        ? ("已将「" + appName + "」加入守护清单 (累计上限跟随全局)")
+                        : ("已将「" + appName + "」加入守护清单 (累计上限 " + formatMins(selected[0]) + ")");
+                    Toast.makeText(MonitorSettingsActivity.this, msg, Toast.LENGTH_SHORT).show();
+                }
+            })
+            .setNegativeButton("取消", null)
+            .show();
     }
 
     private static class AppItem {

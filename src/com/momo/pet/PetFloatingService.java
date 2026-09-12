@@ -56,6 +56,7 @@ public class PetFloatingService extends Service {
     private TextView timerView;
     private LinearLayout menuLayout;
     private android.widget.FrameLayout circleOverlay;
+    private WindowManager.LayoutParams circleParams;
     private WindowManager.LayoutParams params;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -162,6 +163,8 @@ public class PetFloatingService extends Service {
     private long currentPkgStartTime = 0;
     private long lastWarningTime = 0;
     private int warningStage = 0; // 0: 未提醒, 1: 初次提醒, 2: 严重超时提醒
+    private long lastDailyWarningTime = 0; // 上次弹出今日累计超标提醒的时间戳
+    private String lastDailyWarningPkg = null; // 上次累计提醒的包名
     private boolean isWarningBubbleActive = false; // 是否正展示强调提醒气泡（常驻不消失，直到点击人物）
 
     // 分场景台词库：轻松、可爱、正向，但不强行灌鸡汤
@@ -271,6 +274,9 @@ public class PetFloatingService extends Service {
         handler.removeCallbacksAndMessages(null);
         if (petContainer != null && windowManager != null) {
             try { windowManager.removeView(petContainer); } catch (Exception ignored) {}
+        }
+        if (circleOverlay != null && windowManager != null && circleOverlay.isAttachedToWindow()) {
+            try { windowManager.removeView(circleOverlay); } catch (Exception ignored) {}
         }
         if (bubbleView != null && windowManager != null && bubbleView.isAttachedToWindow()) {
             try { windowManager.removeView(bubbleView); } catch (Exception ignored) {}
@@ -453,32 +459,21 @@ public class PetFloatingService extends Service {
         ip.gravity = Gravity.CENTER_HORIZONTAL;
         petImageView.setLayoutParams(ip);
         petImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        container.addView(petImageView);
 
-        // 人物与环形按钮重叠容器
-        android.widget.FrameLayout petLayer = new android.widget.FrameLayout(this);
-        petLayer.setClipChildren(false);
-        petLayer.setClipToPadding(false);
-        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        );
-        plp.gravity = Gravity.CENTER_HORIZONTAL;
-        petLayer.setLayoutParams(plp);
-        petLayer.addView(petImageView);
-
-        // 围绕人物的环形按键容器 (绝对坐标排布)
+        // 独立环形菜单悬浮窗容器 (独立窗口，支持围绕人物智能扇形/圆环排布)
         circleOverlay = new android.widget.FrameLayout(this);
         circleOverlay.setClipChildren(false);
         circleOverlay.setClipToPadding(false);
         circleOverlay.setVisibility(View.GONE);
-        android.widget.FrameLayout.LayoutParams clp = new android.widget.FrameLayout.LayoutParams(
-            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-            android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+        circleParams = new WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
         );
-        circleOverlay.setLayoutParams(clp);
-        petLayer.addView(circleOverlay);
-
-        container.addView(petLayer);
+        circleParams.gravity = Gravity.TOP | Gravity.START;
 
         // 4. 模式切换悬浮菜单 (Menu Card)
         menuLayout = new LinearLayout(this);
@@ -584,7 +579,7 @@ public class PetFloatingService extends Service {
                         }
                     } else if (dur < 300) {
                         // 如果菜单或环形按钮正开着，点击墨墨则收起菜单
-                        if (menuLayout.getVisibility() == View.VISIBLE || circleOverlay.getVisibility() == View.VISIBLE) {
+                        if (isMenuShowing()) {
                             hideMenu();
                             tapCount = 0;
                             handler.removeCallbacks(tapTimeoutRunnable);
@@ -700,9 +695,15 @@ public class PetFloatingService extends Service {
         }
     }
 
+    private boolean isMenuShowing() {
+        boolean circleOpen = (circleOverlay != null && circleOverlay.isAttachedToWindow() && circleOverlay.getVisibility() == View.VISIBLE);
+        boolean cardOpen = (menuLayout != null && menuLayout.getVisibility() == View.VISIBLE);
+        return circleOpen || cardOpen;
+    }
+
     private void onLongPress() {
         lastInteractMs = System.currentTimeMillis();
-        if (circleOverlay.getVisibility() == View.VISIBLE || menuLayout.getVisibility() == View.VISIBLE) {
+        if (isMenuShowing()) {
             hideMenu();
         } else {
             SoundManager.getInstance(this).play("menu");
@@ -715,55 +716,49 @@ public class PetFloatingService extends Service {
     // ═══════════════════════════════════════════════════════════════
 
     private void showMainMenu() {
-        if (circleOverlay == null) return;
+        if (circleOverlay == null || windowManager == null || petContainer == null) return;
         circleOverlay.removeAllViews();
         menuLayout.setVisibility(View.GONE);
 
-        int sz = dp(SIZES_DP[sizeIdx]);
-        // 针对不同体型自适应按键尺寸与边距，确保 100% 完整落在人物图层四角内侧
-        int btnSz = (sizeIdx == 0) ? dp(30) : (sizeIdx == 1 ? dp(36) : dp(40));
-        int pad = (sizeIdx == 0) ? dp(2) : dp(4);
+        // 按钮规格配置：贴边扇形时适当精致化，防止按钮自身过大相互踩踏
+        final int defaultBtnSz = (sizeIdx == 0) ? dp(38) : (sizeIdx == 1 ? dp(42) : dp(46));
+        final int petSz = dp(SIZES_DP[sizeIdx]);
+        final int radius = (int) (petSz * 0.70f); // 围绕人物中心向外的基准环绕半径
 
-        // 紧凑四角环形配置（左上、右上、右下、左下），完全在容器尺寸内部，不受父级边界裁切
-        class CornerBtnConfig {
+        class CircleBtnItem {
             String label;
-            int left;
-            int top;
             int bgColor;
             int textColor;
             View.OnClickListener listener;
-            CornerBtnConfig(String l, int lf, int tp, int bg, int tc, View.OnClickListener lis) {
-                label = l; left = lf; top = tp; bgColor = bg; textColor = tc; listener = lis;
+            CircleBtnItem(String l, int bg, int tc, View.OnClickListener lis) {
+                label = l; bgColor = bg; textColor = tc; listener = lis;
             }
         }
 
-        List<CornerBtnConfig> list = new ArrayList<>();
-        // 1. 专注（左上）
-        list.add(new CornerBtnConfig("专注", pad, pad, 0xEE1E293B, 0xFF6EE7B7, new View.OnClickListener() {
+        List<CircleBtnItem> items = new ArrayList<>();
+        // 1. 专注
+        items.add(new CircleBtnItem("专注", 0xEE1E293B, 0xFF6EE7B7, new View.OnClickListener() {
             @Override public void onClick(View v) {
-                circleOverlay.setVisibility(View.GONE);
+                hideMenu();
                 showTimerSelection(Mode.STUDY);
             }
         }));
-
-        // 2. 休闲（右上）
-        list.add(new CornerBtnConfig("休闲", sz - pad - btnSz, pad, 0xEE1E293B, 0xFFFCD34D, new View.OnClickListener() {
+        // 2. 休闲
+        items.add(new CircleBtnItem("休闲", 0xEE1E293B, 0xFFFCD34D, new View.OnClickListener() {
             @Override public void onClick(View v) {
-                circleOverlay.setVisibility(View.GONE);
+                hideMenu();
                 showTimerSelection(Mode.LEISURE);
             }
         }));
-
-        // 3. 音乐（右下）
-        list.add(new CornerBtnConfig("音乐", sz - pad - btnSz, sz - pad - btnSz, 0xEE1E293B, 0xFFC084FC, new View.OnClickListener() {
+        // 3. 音乐
+        items.add(new CircleBtnItem("音乐", 0xEE1E293B, 0xFFC084FC, new View.OnClickListener() {
             @Override public void onClick(View v) {
-                circleOverlay.setVisibility(View.GONE);
+                hideMenu();
                 showMusicMenu();
             }
         }));
-
-        // 4. 统计（左下）
-        list.add(new CornerBtnConfig("统计", pad, sz - pad - btnSz, 0xEE1E293B, 0xFF38BDF8, new View.OnClickListener() {
+        // 4. 统计
+        items.add(new CircleBtnItem("统计", 0xEE1E293B, 0xFF38BDF8, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 hideMenu();
                 Intent intent = new Intent(PetFloatingService.this, StatsActivity.class);
@@ -771,9 +766,8 @@ public class PetFloatingService extends Service {
                 startActivity(intent);
             }
         }));
-
-        // 5. 守护设置（正上方）
-        list.add(new CornerBtnConfig("守护", sz / 2 - btnSz / 2, pad, 0xEE1E293B, 0xFFF472B6, new View.OnClickListener() {
+        // 5. 守护设置
+        items.add(new CircleBtnItem("守护", 0xEE1E293B, 0xFFF472B6, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 hideMenu();
                 Intent intent = new Intent(PetFloatingService.this, MonitorSettingsActivity.class);
@@ -786,14 +780,13 @@ public class PetFloatingService extends Service {
         if (currentMode != Mode.NORMAL || timerRunning) {
             String pauseLabel = timerPaused ? "继续" : "暂停";
             int pauseColor = timerPaused ? 0xFF6EE7B7 : 0xFFFCD34D;
-            list.add(new CornerBtnConfig(pauseLabel, sz / 2 - btnSz - dp(3), sz - pad - btnSz, 0xEE1E293B, pauseColor, new View.OnClickListener() {
+            items.add(new CircleBtnItem(pauseLabel, 0xEE1E293B, pauseColor, new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     toggleTimerPause();
                     hideMenu();
                 }
             }));
-
-            list.add(new CornerBtnConfig("结束", sz / 2 + dp(3), sz - pad - btnSz, 0xEE450A0A, 0xFFFCA5A5, new View.OnClickListener() {
+            items.add(new CircleBtnItem("结束", 0xEE450A0A, 0xFFFCA5A5, new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     switchToNormalMode();
                     hideMenu();
@@ -801,34 +794,124 @@ public class PetFloatingService extends Service {
             }));
         }
 
-        for (CornerBtnConfig cfg : list) {
+        // ════ 智能环形方位决策 (上方圆环 / 下方圆环 / 左侧圆环 / 右侧圆环 / 全向饱满圆环) ════
+        int screenW = displayMetrics.widthPixels;
+        int screenH = displayMetrics.heightPixels;
+        int petCenterX = params.x + petSz / 2;
+        int petCenterY = params.y + petSz / 2;
+
+        int spaceTop = petCenterY - radius - defaultBtnSz / 2;
+        int spaceBottom = screenH - (petCenterY + radius + defaultBtnSz / 2);
+        int spaceLeft = petCenterX - radius - defaultBtnSz / 2;
+        int spaceRight = screenW - (petCenterX + radius + defaultBtnSz / 2);
+
+        double startAngleDeg;
+        double endAngleDeg;
+        int activeRadius = radius;
+        int btnSz = defaultBtnSz;
+
+        int n = items.size();
+        if (spaceLeft < dp(40) || edgeSide < 0) {
+            // 人物贴在左屏幕边缘 -> 弧度智能排布，向右侧开阔空间优雅环绕，保证按键不重叠且紧致
+            btnSz = (sizeIdx == 0) ? dp(34) : (sizeIdx == 1 ? dp(38) : dp(42));
+            activeRadius = (int) (petSz * 0.62f);
+            int safeSpacing = dp(6);
+            double targetChord = btnSz + safeSpacing;
+            double stepDeg = Math.toDegrees(2.0 * Math.asin(Math.min(0.95, targetChord / (2.0 * activeRadius))));
+            double totalSpan = stepDeg * (n - 1);
+            startAngleDeg = -totalSpan / 2.0;
+            endAngleDeg = totalSpan / 2.0;
+        } else if (spaceRight < dp(40) || edgeSide > 0) {
+            // 人物贴在右屏幕边缘 -> 弧度智能排布，向左侧开阔空间优雅环绕，保证按键不重叠且紧致
+            btnSz = (sizeIdx == 0) ? dp(34) : (sizeIdx == 1 ? dp(38) : dp(42));
+            activeRadius = (int) (petSz * 0.62f);
+            int safeSpacing = dp(6);
+            double targetChord = btnSz + safeSpacing;
+            double stepDeg = Math.toDegrees(2.0 * Math.asin(Math.min(0.95, targetChord / (2.0 * activeRadius))));
+            double totalSpan = stepDeg * (n - 1);
+            startAngleDeg = 180.0 - totalSpan / 2.0;
+            endAngleDeg = 180.0 + totalSpan / 2.0;
+        } else if (spaceTop < dp(50)) {
+            // 人物贴近屏幕顶部，上方空间不足 -> 在人物身下展开向下弧形 (角度: 35° ~ 145°)
+            btnSz = defaultBtnSz;
+            activeRadius = (int) (petSz * 0.60f);
+            startAngleDeg = 35.0;
+            endAngleDeg = 145.0;
+        } else if (spaceBottom < dp(50)) {
+            // 人物贴近屏幕底部，下方空间不足 -> 在人物头顶展开向上弧形 (角度: 215° ~ 325°)
+            btnSz = defaultBtnSz;
+            activeRadius = (int) (petSz * 0.60f);
+            startAngleDeg = 215.0;
+            endAngleDeg = 325.0;
+        } else {
+            // 人物处于屏幕中间舒适区 -> 360 度完美整圆环绕排列
+            btnSz = defaultBtnSz;
+            activeRadius = (int) (petSz * 0.65f);
+            startAngleDeg = -90.0; // 从正上方 12 点钟方向开始
+            endAngleDeg = -90.0 + 360.0 * (n - 1) / n;
+        }
+
+        // 计算独立 circleOverlay 悬浮窗口的物理位置与尺寸 (包容整个圆环)
+        int winPadding = dp(8);
+        int overlaySize = (activeRadius + btnSz / 2 + winPadding) * 2;
+        int winLeft = petCenterX - overlaySize / 2;
+        int winTop = petCenterY - overlaySize / 2;
+
+        circleParams.x = winLeft;
+        circleParams.y = winTop;
+        circleParams.width = overlaySize;
+        circleParams.height = overlaySize;
+
+        int originX = overlaySize / 2;
+        int originY = overlaySize / 2;
+
+        for (int i = 0; i < n; i++) {
+            CircleBtnItem item = items.get(i);
+            double angleDeg = (n == 1) ? startAngleDeg : (startAngleDeg + i * (endAngleDeg - startAngleDeg) / (n - 1));
+            double rad = Math.toRadians(angleDeg);
+
+            int btnCenterX = originX + (int) (activeRadius * Math.cos(rad));
+            int btnCenterY = originY + (int) (activeRadius * Math.sin(rad));
+
             Button b = new Button(this);
-            b.setText(cfg.label);
+            b.setText(item.label);
             b.setTextSize(sizeIdx == 0 ? 9 : (sizeIdx == 1 ? 11 : 12));
             b.setTypeface(null, android.graphics.Typeface.BOLD);
-            b.setTextColor(cfg.textColor);
+            b.setTextColor(item.textColor);
             b.setPadding(0, 0, 0, 0);
             b.setGravity(Gravity.CENTER);
 
-            // 纯净极简圆形背景
+            // 纯净质感深空圆钮 + 磨砂微透描边
             android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
             gd.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-            gd.setColor(cfg.bgColor);
-            gd.setStroke(dp(1), 0x55FFFFFF);
+            gd.setColor(item.bgColor);
+            gd.setStroke(dp(1), 0x44FFFFFF);
             b.setBackground(gd);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                b.setElevation(dp(6));
+                b.setElevation(dp(8));
             }
 
-            b.setOnClickListener(cfg.listener);
+            b.setOnClickListener(item.listener);
 
             android.widget.FrameLayout.LayoutParams blp = new android.widget.FrameLayout.LayoutParams(btnSz, btnSz);
-            blp.leftMargin = cfg.left;
-            blp.topMargin = cfg.top;
+            blp.leftMargin = btnCenterX - btnSz / 2;
+            blp.topMargin = btnCenterY - btnSz / 2;
             circleOverlay.addView(b, blp);
         }
 
+        circleOverlay.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                hideMenu();
+            }
+        });
         circleOverlay.setVisibility(View.VISIBLE);
+        try {
+            if (circleOverlay.isAttachedToWindow()) {
+                windowManager.updateViewLayout(circleOverlay, circleParams);
+            } else {
+                windowManager.addView(circleOverlay, circleParams);
+            }
+        } catch (Exception ignored) {}
     }
 
     private void showTimerSelection(final Mode targetMode) {
@@ -1075,6 +1158,11 @@ public class PetFloatingService extends Service {
     private void hideMenu() {
         if (circleOverlay != null) {
             circleOverlay.setVisibility(View.GONE);
+            if (windowManager != null && circleOverlay.isAttachedToWindow()) {
+                try {
+                    windowManager.removeView(circleOverlay);
+                } catch (Exception ignored) {}
+            }
             circleOverlay.removeAllViews();
         }
         if (menuLayout != null) {
@@ -1140,7 +1228,21 @@ public class PetFloatingService extends Service {
         } else if (currentMode == Mode.LEISURE) {
             play("leisure", true, null);
         } else {
-            play("idle", true, null);
+            // 普通自由模式：若正在播放音乐，优先保持听音乐动作
+            if (isDeviceMusicPlaying() && actionMap.containsKey("listen_music")) {
+                play("listen_music", true, null);
+            } else {
+                play("idle", true, null);
+            }
+        }
+    }
+
+    private boolean isDeviceMusicPlaying() {
+        try {
+            android.media.AudioManager am = (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            return am != null && am.isMusicActive();
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -1389,6 +1491,7 @@ public class PetFloatingService extends Service {
         if (action.contains("daze")) return "发会儿呆，脑袋整理好再出发。";
         if (action.contains("curious")) return "让我看看……这里是不是有个小线索？";
         if (action.contains("cat")) return "团子今天也很可爱。嗯，比你乖一点点。";
+        if (action.contains("listen_music")) return "好听……跟着节拍稍微晃一会儿 🎵";
         if (action.contains("blink")) return "眨眨眼，记得让眼睛也休息一下。";
         return null;
     }
@@ -1466,34 +1569,58 @@ public class PetFloatingService extends Service {
 
     private final Runnable behaviorTick = new Runnable() {
         @Override public void run() {
-            // 学习和休闲模式下锁定动作，不进行 30 秒随机切换！
-            if (currentMode == Mode.NORMAL && !edgeMode && !isOneShot && !dragging) {
-                long idle = System.currentTimeMillis() - lastInteractMs;
-                if (idle > 150000) {
-                    if (!"sleep_smooth".equals(currentAction)) {
-                        play("sleep_smooth", true, null);
-                        showBubble("呼……困了，先趴会儿…… zZz", 2500);
+            // 学习和休闲模式、贴边、计时或处于单次动作中，不进行 30 秒随机切换！
+            if (currentMode == Mode.NORMAL && !edgeMode && !isOneShot && !dragging && !timerRunning) {
+                // 如果系统正在播放音乐，保持听音乐状态，不被闲置动作打断
+                if (isDeviceMusicPlaying() && actionMap.containsKey("listen_music")) {
+                    if (!"listen_music".equals(currentAction)) {
+                        play("listen_music", true, null);
                     }
                 } else {
-                    play(nextDeckAction(), true, null);
+                    long idle = System.currentTimeMillis() - lastInteractMs;
+                    if (idle > 150000) {
+                        if (!"sleep_smooth".equals(currentAction)) {
+                            play("sleep_smooth", true, null);
+                            showBubble("呼……困了，先趴会儿…… zZz", 2500);
+                        }
+                    } else {
+                        play(nextDeckAction(), true, null);
+                    }
                 }
             }
             handler.postDelayed(this, 30000);
         }
     };
 
-    // ── 防沉迷应用监控循环（每 5 秒轮询前台应用）─────────────────────
+    // ── 系统状态感知与监控循环（每 3 秒检测音乐播放与前台应用）─────────────────────
+    private boolean lastMusicPlaying = false;
     private void startAppMonitorLoop() {
-        handler.postDelayed(appMonitorTick, 5000);
+        handler.postDelayed(appMonitorTick, 3000);
     }
 
     private final Runnable appMonitorTick = new Runnable() {
         @Override
         public void run() {
+            checkMusicState();
             checkForegroundAppUsage();
-            handler.postDelayed(this, 5000);
+            handler.postDelayed(this, 3000);
         }
     };
+
+    private void checkMusicState() {
+        boolean isPlaying = isDeviceMusicPlaying();
+        if (isPlaying != lastMusicPlaying) {
+            lastMusicPlaying = isPlaying;
+            // 只有在自由模式、未贴边、未在计时、未处于拖拽或单次交互动作中才自动切换音乐状态
+            if (currentMode == Mode.NORMAL && !edgeMode && !timerRunning && !dragging && !isOneShot) {
+                if (isPlaying && actionMap.containsKey("listen_music")) {
+                    play("listen_music", true, null);
+                } else if (!isPlaying && "listen_music".equals(currentAction)) {
+                    play("idle", true, null);
+                }
+            }
+        }
+    }
 
     private void checkForegroundAppUsage() {
         // 如果未开启防沉迷，或者处于学习/休闲计时模式，不打扰
@@ -1564,6 +1691,22 @@ public class PetFloatingService extends Service {
                 lastWarningTime = now;
                 triggerUsageWarning(appName, continuousMin, 2);
             }
+
+            // ════ 今日累计使用时长监控 (Daily Accumulation) ════
+            int dailyLimitMin = AppMonitorManager.getAppDailyLimitMinutes(this, currentForeground);
+            if (dailyLimitMin > 0) {
+                int todayUsedMin = AppMonitorManager.getAppTodayUsedMinutes(this, currentForeground);
+                if (todayUsedMin >= dailyLimitMin) {
+                    // 满足累计提醒条件：首次超过，或者距离上次提醒超过 30 分钟 (1800000ms)，且当前未在弹气泡
+                    boolean shouldRemind = (lastDailyWarningPkg == null || !lastDailyWarningPkg.equals(currentForeground))
+                        || (now - lastDailyWarningTime > 1800000);
+                    if (shouldRemind && !isWarningBubbleActive) {
+                        lastDailyWarningTime = now;
+                        lastDailyWarningPkg = currentForeground;
+                        triggerDailyLimitWarning(appName, todayUsedMin, dailyLimitMin);
+                    }
+                }
+            }
         } catch (Exception ignored) {}
     }
 
@@ -1612,6 +1755,30 @@ public class PetFloatingService extends Service {
             };
             showWarningBubble(severeQuotes[random.nextInt(severeQuotes.length)], 2);
         }
+    }
+
+    // 触发今日累计超标提醒
+    private void triggerDailyLimitWarning(String appName, int usedMins, int limitMins) {
+        SoundManager.getInstance(this).play("alert");
+        // 饱满节奏震动：提醒今日总额度见底
+        vibratePattern(
+            new long[]{0, 350, 150, 350},
+            new int[]{0, 255, 0, 255}
+        );
+        playOnce("daze", new Runnable() {
+            @Override public void run() { resumeCurrentMode(); }
+        });
+
+        String timeStr = usedMins >= 60
+            ? String.format(Locale.getDefault(), "%.1f 小时", usedMins / 60.0f)
+            : (usedMins + " 分钟");
+
+        String[] dailyQuotes = {
+            "📊「" + appName + "」今天累计看了 " + timeStr + " 啦！今日额度已达标，留点精力给自己吧。",
+            "📊 算了一下，今天在「" + appName + "」上花了 " + timeStr + "。团子揉了揉眼睛，提醒你歇歇啦~ 🐱",
+            "📊 今日「" + appName + "」总时长达到 " + timeStr + " 啦！碎片时间聚少成多，放下手机喝杯水吧？"
+        };
+        showWarningBubble(dailyQuotes[random.nextInt(dailyQuotes.length)], 1);
     }
 
     private void vibratePattern(long[] pattern, int[] amplitudes) {
