@@ -28,6 +28,13 @@ public class StatsActivity extends Activity {
     private TextView tvDateStudyVal;
     private TextView tvDateLeisureVal;
 
+    // 周期总览组件引用 (用于 onResume 实时刷新)
+    private TextView tvTodayStudyVal;
+    private TextView tvTodayLeisureVal;
+    private TextView tvWeekStudyVal;
+    private TextView tvWeekLeisureVal;
+    private TextView tvTipContent;
+
     // 柱状图容器引用
     private LinearLayout chartBarsContainer;
 
@@ -227,13 +234,13 @@ public class StatsActivity extends Activity {
         summaryCard.setPadding(dp(16), dp(16), dp(16), dp(16));
         summaryCard.setElevation(dp(2));
 
-        long todayStudy = StatsManager.getTodayStudySec(this);
-        long todayLeisure = StatsManager.getTodayLeisureSec(this);
-        long weekStudy = StatsManager.getWeekStudySec(this);
-        long weekLeisure = StatsManager.getWeekLeisureSec(this);
+        tvTodayStudyVal = new TextView(this);
+        tvTodayLeisureVal = new TextView(this);
+        tvWeekStudyVal = new TextView(this);
+        tvWeekLeisureVal = new TextView(this);
 
-        summaryCard.addView(makeStatRow("📅 今日专注打卡", StatsManager.formatDuration(todayStudy), 0xFF14B8A6));
-        summaryCard.addView(makeStatRow("📅 今日休闲小憩", StatsManager.formatDuration(todayLeisure), 0xFFF59E0B));
+        summaryCard.addView(makeStatRowWithView("📅 今日专注打卡", tvTodayStudyVal, 0xFF14B8A6));
+        summaryCard.addView(makeStatRowWithView("📅 今日休闲小憩", tvTodayLeisureVal, 0xFFF59E0B));
 
         View div2 = new View(this);
         div2.setBackgroundColor(0xFFF3EFEA);
@@ -241,8 +248,8 @@ public class StatsActivity extends Activity {
         dlp2.setMargins(0, dp(10), 0, dp(10));
         summaryCard.addView(div2, dlp2);
 
-        summaryCard.addView(makeStatRow("📊 本周累计专注", StatsManager.formatDuration(weekStudy), 0xFF0D9488));
-        summaryCard.addView(makeStatRow("📊 本周累计休闲", StatsManager.formatDuration(weekLeisure), 0xFFD97706));
+        summaryCard.addView(makeStatRowWithView("📊 本周累计专注", tvWeekStudyVal, 0xFF0D9488));
+        summaryCard.addView(makeStatRowWithView("📊 本周累计休闲", tvWeekLeisureVal, 0xFFD97706));
         root.addView(summaryCard);
 
         // 5. 墨墨寄语彩蛋卡片
@@ -262,25 +269,53 @@ public class StatsActivity extends Activity {
         tipHeader.setTextColor(0xFF4A443E);
         encouragementCard.addView(tipHeader);
 
-        TextView tipContent = new TextView(this);
-        String eggMsg = todayStudy >= 3600
-            ? "哇……今天已经专注了超过 1 个小时！团子在键盘上打出了五星好评，快站起来伸展一下关节吧。"
-            : (todayStudy > 0
-                ? "每一次点击开始，都是对自己的负责。墨墨陪着你一点一点走，完全不用慌张。"
-                : "今天还没开启计时专注呢。想学就长按墨墨开始，不想学就瘫着放空，都随你。");
-        tipContent.setText(eggMsg);
-        tipContent.setTextSize(12);
-        tipContent.setTextColor(0xFF756C64);
-        tipContent.setPadding(0, dp(6), 0, 0);
-        encouragementCard.addView(tipContent);
+        tvTipContent = new TextView(this);
+        tvTipContent.setTextSize(12);
+        tvTipContent.setTextColor(0xFF756C64);
+        tvTipContent.setPadding(0, dp(6), 0, 0);
+        encouragementCard.addView(tvTipContent);
         root.addView(encouragementCard);
 
         setContentView(scrollView);
 
         // 初始化数据与图表
         updateTabStyles();
+        refreshAllStats();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refreshAllStats();
+    }
+
+    private void refreshAllStats() {
         renderBarChart();
         updateSelectedDateData();
+        updateSummaryCard();
+    }
+
+    private void updateSummaryCard() {
+        long todayStudy = StatsManager.getTodayStudySec(this);
+        long todayLeisure = StatsManager.getTodayLeisureSec(this);
+        long weekStudy = StatsManager.getWeekStudySec(this);
+        long weekLeisure = StatsManager.getWeekLeisureSec(this);
+
+        if (tvTodayStudyVal != null) tvTodayStudyVal.setText(StatsManager.formatDuration(todayStudy));
+        if (tvTodayLeisureVal != null) tvTodayLeisureVal.setText(StatsManager.formatDuration(todayLeisure));
+        if (tvWeekStudyVal != null) tvWeekStudyVal.setText(StatsManager.formatDuration(weekStudy));
+        if (tvWeekLeisureVal != null) tvWeekLeisureVal.setText(StatsManager.formatDuration(weekLeisure));
+
+        if (tvTipContent != null) {
+            String eggMsg = todayStudy >= 3600
+                ? "哇……今天已经专注了超过 1 个小时！团子在键盘上打出了五星好评，快站起来伸展一下关节吧。"
+                : (todayStudy > 0
+                    ? "每一次点击开始，都是对自己的负责。墨墨陪着你一点一点走，完全不用慌张。"
+                    : (todayLeisure > 0
+                        ? "休闲放松也是积攒能量的一部分。休息好了，随时准备出发~"
+                        : "今天还没开启计时专注呢。想学就长按墨墨开始，不想学就瘫着放空，都随你。"));
+            tvTipContent.setText(eggMsg);
+        }
     }
 
     private void updateTabStyles() {

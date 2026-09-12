@@ -62,14 +62,44 @@ public class PetFloatingService extends Service {
 
     // 动作帧数据
     public static class FrameItem {
-        Bitmap bitmap; int durationMs;
-        FrameItem(Bitmap b, int d) { bitmap = b; durationMs = d; }
+        String filePath;
+        int durationMs;
+        FrameItem(String fp, int d) { filePath = fp; durationMs = d; }
     }
     public static class ActionItem {
         boolean loop; String nextAction;
         List<FrameItem> frames = new ArrayList<>();
     }
     private final Map<String, ActionItem> actionMap = new HashMap<>();
+
+    // 基于 LRU 的超轻量图片缓存（只在内存保留最近用到的 60 帧，约 15MB 内存，彻底告别 OOM 闪退！）
+    private final android.util.LruCache<String, Bitmap> bitmapCache = 
+        new android.util.LruCache<String, Bitmap>(60) {
+            @Override
+            protected void entryRemoved(boolean evicted, String key, Bitmap oldValue, Bitmap newValue) {
+                // 由 GC 自动回收
+            }
+        };
+
+    private Bitmap getOrLoadBitmap(String file) {
+        Bitmap bmp = bitmapCache.get(file);
+        if (bmp != null && !bmp.isRecycled()) {
+            return bmp;
+        }
+        try {
+            InputStream imgIs = getAssets().open(file);
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            opts.inSampleSize = 1;
+            opts.inScaled = false;
+            bmp = BitmapFactory.decodeStream(imgIs, null, opts);
+            imgIs.close();
+            if (bmp != null) {
+                bitmapCache.put(file, bmp);
+            }
+        } catch (Exception ignored) {}
+        return bmp;
+    }
 
     // 普通随机动作池（排除拖动、睡觉、学习、休闲）
     private static final String[] POOL_ACTIONS = {
@@ -125,6 +155,13 @@ public class PetFloatingService extends Service {
     // 尺寸档位：迷你(90dp)、小巧(125dp)、标准(160dp)、大只(200dp)
     private final int[] SIZES_DP = {90, 125, 160, 200};
     private int sizeIdx = 2; // 默认标准档位
+
+    // 防沉迷监控状态跟踪
+    private String lastForegroundPkg = null;
+    private long currentPkgStartTime = 0;
+    private long lastWarningTime = 0;
+    private int warningStage = 0; // 0: 未提醒, 1: 初次提醒, 2: 严重超时提醒
+    private boolean isWarningBubbleActive = false; // 是否正展示强调提醒气泡（常驻不消失，直到点击人物）
 
     // 分场景台词库：轻松、可爱、正向，但不强行灌鸡汤
     private final String[] QUOTES_NORMAL = {
@@ -199,6 +236,7 @@ public class PetFloatingService extends Service {
         buildWindow();
         startAnimLoop();
         startBehaviorLoop();
+        startAppMonitorLoop();
     }
 
     @Override
@@ -233,6 +271,7 @@ public class PetFloatingService extends Service {
         if (petContainer != null && windowManager != null) {
             try { windowManager.removeView(petContainer); } catch (Exception ignored) {}
         }
+        SoundManager.getInstance(this).release();
         releaseWakeLock();
         scheduleRestart();
     }
@@ -305,35 +344,18 @@ public class PetFloatingService extends Service {
             JSONObject root = new JSONObject(new String(bytes, StandardCharsets.UTF_8));
             JSONObject actions = root.getJSONObject("actions");
 
-            Map<String, Bitmap> cache = new HashMap<>();
-
             for (java.util.Iterator<String> it = actions.keys(); it.hasNext(); ) {
                 String name = it.next();
                 JSONObject ao = actions.getJSONObject(name);
                 ActionItem item = new ActionItem();
                 item.loop = ao.optBoolean("loop", true);
                 item.nextAction = ao.optString("next_action", null);
-
                 JSONArray fa = ao.getJSONArray("frames");
                 for (int i = 0; i < fa.length(); i++) {
                     JSONObject fr = fa.getJSONObject(i);
                     String file = fr.getString("file");
                     int dur = fr.optInt("duration_ms", 40);
-
-                    Bitmap bmp = cache.get(file);
-                    if (bmp == null) {
-                        try {
-                            InputStream imgIs = am.open(file);
-BitmapFactory.Options opts = new BitmapFactory.Options();
-                            opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
-                            opts.inSampleSize = 1; // 保留原始分辨率，避免人物边缘和像素细节变糊
-                            opts.inScaled = false;   // 禁止按设备密度再次缩放，保持素材清晰度
-                            bmp = BitmapFactory.decodeStream(imgIs, null, opts);
-                            imgIs.close();
-                            if (bmp != null) cache.put(file, bmp);
-                        } catch (Exception ignored) {}
-                    }
-                    if (bmp != null) item.frames.add(new FrameItem(bmp, dur));
+                    item.frames.add(new FrameItem(file, dur));
                 }
                 if (!item.frames.isEmpty()) actionMap.put(name, item);
             }
@@ -511,6 +533,7 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
                         handler.removeCallbacks(longPressRunnable); // 移动则取消长按
                         hideMenu();
                         if (bubbleView != null) bubbleView.setVisibility(View.GONE); // 拖拽时收起气泡，防止向上遮挡阻碍视线
+                        SoundManager.getInstance(PetFloatingService.this).play("drag");
                         play("drag_smooth", true, null);
                     }
                     if (dragging) {
@@ -546,11 +569,13 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
                             edgeMode = true;
                             edgeSide = nearLeft ? -1 : 1;
                             snapToEdge();
+                            SoundManager.getInstance(PetFloatingService.this).play("snap");
                             play(edgeSide < 0 ? "edge_left" : "edge_right", true, null);
                             showBubble(edgeSide < 0 ? "贴到左边啦。这里也能陪你。" : "贴到右边啦。团子说这里视野不错。", 2600);
                         } else {
                             edgeMode = false;
                             edgeSide = 0;
+                            SoundManager.getInstance(PetFloatingService.this).play("tap");
                             playOnce("curious", new Runnable() {
                             @Override public void run() { resumeCurrentMode(); }
                             });
@@ -588,8 +613,19 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
 
     private void onSingleTap() {
         lastInteractMs = System.currentTimeMillis();
+
+        // 如果当前正弹着防沉迷超时提醒气泡，点击墨墨立刻收起该提醒
+        if (isWarningBubbleActive) {
+            isWarningBubbleActive = false;
+            if (bubbleView != null) bubbleView.setVisibility(View.GONE);
+            SoundManager.getInstance(this).play("tap");
+            showBubble("好啦，知道你看到提醒了。那快休息下吧~ 🐱", 2200);
+            return;
+        }
+
         // 贴边后点击只触发互动，不退出贴边；必须拖离边缘才解除
         if (edgeMode) {
+            SoundManager.getInstance(this).play("tap");
             showBubble(edgeSide < 0 ? "嗯？贴着边也能陪你。" : "团子说，右边的位置不错。", 2400);
             play(edgeSide < 0 ? "edge_left" : "edge_right", true, null);
             snapToEdge();
@@ -597,12 +633,14 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
         }
         resumeCurrentMode();
         if (currentMode == Mode.STUDY) {
+            SoundManager.getInstance(this).play("tap");
             String quote = QUOTES_STUDY[random.nextInt(QUOTES_STUDY.length)];
             showBubble(quote, 2800);
             playOnce("curious", new Runnable() {
                 @Override public void run() { resumeCurrentMode(); }
             });
         } else if (currentMode == Mode.LEISURE) {
+            SoundManager.getInstance(this).play("cat");
             String quote = QUOTES_LEISURE[random.nextInt(QUOTES_LEISURE.length)];
             showBubble(quote, 2800);
             playOnce("happy", new Runnable() {
@@ -611,6 +649,11 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
         } else {
             String[] tapPool = {"click","happy","hug","drink","cat","angry"};
             String act = tapPool[random.nextInt(tapPool.length)];
+            if ("cat".equals(act) || "hug".equals(act)) {
+                SoundManager.getInstance(this).play("cat");
+            } else {
+                SoundManager.getInstance(this).play("tap");
+            }
             showBubble(QUOTES_NORMAL[random.nextInt(QUOTES_NORMAL.length)], 2800);
             playOnce(act, new Runnable() {
                 @Override public void run() { resumeCurrentMode(); }
@@ -620,6 +663,7 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
 
     private void onDoubleTap() {
         lastInteractMs = System.currentTimeMillis();
+        SoundManager.getInstance(this).play("size");
         sizeIdx = (sizeIdx + 1) % SIZES_DP.length;
         int sz = dp(SIZES_DP[sizeIdx]);
         android.view.ViewGroup.LayoutParams lp = petImageView.getLayoutParams();
@@ -660,6 +704,7 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
         if (circleOverlay.getVisibility() == View.VISIBLE || menuLayout.getVisibility() == View.VISIBLE) {
             hideMenu();
         } else {
+            SoundManager.getInstance(this).play("menu");
             showMainMenu();
         }
     }
@@ -726,7 +771,17 @@ BitmapFactory.Options opts = new BitmapFactory.Options();
             }
         }));
 
-        // 5. 若正在计时或在特殊模式，增加【暂停/继续】与【结束】按钮
+        // 5. 守护设置（正上方）
+        list.add(new CornerBtnConfig("守护", sz / 2 - btnSz / 2, pad, 0xEE1E293B, 0xFFF472B6, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                hideMenu();
+                Intent intent = new Intent(PetFloatingService.this, MonitorSettingsActivity.class);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+            }
+        }));
+
+        // 6. 若正在计时或在特殊模式，增加【暂停/继续】与【结束】按钮
         if (currentMode != Mode.NORMAL || timerRunning) {
             String pauseLabel = timerPaused ? "继续" : "暂停";
             int pauseColor = timerPaused ? 0xFF6EE7B7 : 0xFFFCD34D;
@@ -1103,6 +1158,7 @@ private void startTimer() {
     private void toggleTimerPause() {
         if (!timerRunning) return;
         timerPaused = !timerPaused;
+        SoundManager.getInstance(this).play("pause");
         if (timerPaused) {
             handler.removeCallbacks(timerTickRunnable);
             handler.removeCallbacks(modeBubbleTickRunnable);
@@ -1176,6 +1232,7 @@ private void startTimer() {
     private void onCountdownFinished() {
         stopTimer();
         timerView.setVisibility(View.GONE);
+        SoundManager.getInstance(this).play("finish");
         String msg = currentMode == Mode.STUDY
             ? "叮！专注时间到啦！很棒哦，站起来喝口水伸个懒腰吧 🎉"
             : "叮！休闲时间结束啦，感觉电量充满了吗？(。•̀ᴗ-)✧";
@@ -1189,13 +1246,47 @@ private void startTimer() {
 
     // ── 气泡 ─────────────────────────────────────────────────────
     private void showBubble(String text, int ms) {
+        if (bubbleView == null) return;
+        isWarningBubbleActive = false;
+        bubbleView.setBackgroundResource(R.drawable.bg_bubble);
+        bubbleView.setTextColor(0xFFFFFFFF);
         bubbleView.setText(text);
         bubbleView.setVisibility(View.VISIBLE);
         handler.removeCallbacks(hideBubble);
-        handler.postDelayed(hideBubble, ms);
+        if (ms > 0) {
+            handler.postDelayed(hideBubble, ms);
+        }
     }
+
+    // 专属防沉迷强调提醒气泡（强调边框与高亮底色，默认不自动消失，直到用户点击墨墨）
+    private void showWarningBubble(String text, int stage) {
+        if (bubbleView == null) return;
+        isWarningBubbleActive = true;
+        handler.removeCallbacks(hideBubble); // 取消自动隐藏定时器，常驻显示
+
+        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+        gd.setCornerRadius(dp(14));
+
+        if (stage == 1) {
+            // 初次超时：优雅沉稳的琥珀橙渐变/强调边框
+            gd.setColor(0xF02A241F); // 极深暖褐黑底
+            gd.setStroke(dp(2), 0xFFF59E0B); // 亮暖橙边框
+            bubbleView.setTextColor(0xFFFEF3C7);
+        } else {
+            // 严重超时：警戒珊瑚赤红强调色
+            gd.setColor(0xF02D1E22); // 极深墨红底
+            gd.setStroke(dp(2), 0xFFF43F5E); // 警戒霓虹玫红边框
+            bubbleView.setTextColor(0xFFFFE4E6);
+        }
+
+        bubbleView.setBackground(gd);
+        bubbleView.setText(text);
+        bubbleView.setVisibility(View.VISIBLE);
+    }
+
     private final Runnable hideBubble = new Runnable() {
         @Override public void run() {
+            isWarningBubbleActive = false;
             if (bubbleView != null) bubbleView.setVisibility(View.GONE);
         }
     };
@@ -1279,7 +1370,10 @@ private void startTimer() {
                 }
                 if (act != null && currentFrameIdx < act.frames.size()) {
                     FrameItem fi = act.frames.get(currentFrameIdx);
-                    petImageView.setImageBitmap(fi.bitmap);
+                    Bitmap bmp = getOrLoadBitmap(fi.filePath);
+                    if (bmp != null) {
+                        petImageView.setImageBitmap(bmp);
+                    }
                     delay = Math.max(16, fi.durationMs);
                     currentFrameIdx++;
                 }
@@ -1310,6 +1404,128 @@ private void startTimer() {
             handler.postDelayed(this, 30000);
         }
     };
+
+    // ── 防沉迷应用监控循环（每 5 秒轮询前台应用）─────────────────────
+    private void startAppMonitorLoop() {
+        handler.postDelayed(appMonitorTick, 5000);
+    }
+
+    private final Runnable appMonitorTick = new Runnable() {
+        @Override
+        public void run() {
+            checkForegroundAppUsage();
+            handler.postDelayed(this, 5000);
+        }
+    };
+
+    private void checkForegroundAppUsage() {
+        // 如果未开启防沉迷，或者处于学习/休闲计时模式，不打扰
+        if (!AppMonitorManager.isMonitorEnabled(this)) return;
+        if (!AppMonitorManager.hasUsageStatsPermission(this)) return;
+
+        try {
+            android.app.usage.UsageStatsManager usm = 
+                (android.app.usage.UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usm == null) return;
+
+            long now = System.currentTimeMillis();
+            // 查询最近 15 秒内的前台切换事件
+            android.app.usage.UsageEvents events = usm.queryEvents(now - 15000, now);
+            android.app.usage.UsageEvents.Event event = new android.app.usage.UsageEvents.Event();
+            String currentForeground = null;
+
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event);
+                if (event.getEventType() == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED) {
+                    currentForeground = event.getPackageName();
+                }
+            }
+
+            // 如果最近 15 秒内无切前台事件，尝试从最近使用的任务列表兜底
+            if (currentForeground == null && lastForegroundPkg != null) {
+                currentForeground = lastForegroundPkg;
+            }
+
+            if (currentForeground == null) return;
+
+            // 如果该应用不属于监控范围（如桌面启动器、系统UI、桌宠自己）
+            if (!AppMonitorManager.shouldMonitor(this, currentForeground)) {
+                // 如果切到了非监控应用，且超过 3 分钟，则重置上个应用的单次计时
+                if (lastForegroundPkg != null && (now - currentPkgStartTime > 180000)) {
+                    lastForegroundPkg = null;
+                    warningStage = 0;
+                }
+                return;
+            }
+
+            // 如果切换了受监控的应用
+            if (!currentForeground.equals(lastForegroundPkg)) {
+                lastForegroundPkg = currentForeground;
+                currentPkgStartTime = now;
+                lastWarningTime = 0;
+                warningStage = 0;
+                return;
+            }
+
+            // 同一个受监控应用在前台连续运行的时长
+            long continuousMs = now - currentPkgStartTime;
+            int continuousMin = (int) (continuousMs / 60000);
+            int limitMin = AppMonitorManager.getLimitMinutes(this);
+
+            // 获取应用名称
+            String appName = getAppName(currentForeground);
+
+            // 阶段一：初次达到阈值提醒（例如 30 分钟）
+            if (continuousMin >= limitMin && warningStage == 0) {
+                warningStage = 1;
+                lastWarningTime = now;
+                triggerUsageWarning(appName, continuousMin, 1);
+            }
+            // 阶段二：严重超时提醒（初次提醒后继续使用 15 分钟）
+            else if (warningStage == 1 && continuousMin >= limitMin + 15 && (now - lastWarningTime > 600000)) {
+                warningStage = 2;
+                lastWarningTime = now;
+                triggerUsageWarning(appName, continuousMin, 2);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private String getAppName(String pkg) {
+        try {
+            android.content.pm.PackageManager pm = getPackageManager();
+            android.content.pm.ApplicationInfo info = pm.getApplicationInfo(pkg, 0);
+            return pm.getApplicationLabel(info).toString();
+        } catch (Exception e) {
+            return "这个 App";
+        }
+    }
+
+    private void triggerUsageWarning(String appName, int minutes, int stage) {
+        SoundManager.getInstance(this).play("alert");
+        if (stage == 1) {
+            // 轻度提醒：curious / daze
+            playOnce("curious", new Runnable() {
+                @Override public void run() { resumeCurrentMode(); }
+            });
+            String[] quotes = {
+                "⚠️「" + appName + "」你已经连着看了 " + minutes + " 分钟啦。眼睛不酸吗？",
+                "⚠️「" + appName + "」玩挺久了哦。团子打了个哈欠，提醒你稍微揉揉眼~",
+                "⚠️ 注意力在「" + appName + "」上停了 " + minutes + " 分钟了。放下手机喝口水吧？"
+            };
+            showWarningBubble(quotes[random.nextInt(quotes.length)], 1);
+        } else {
+            // 严重超时提醒：angry / daze
+            playOnce("angry", new Runnable() {
+                @Override public void run() { resumeCurrentMode(); }
+            });
+            String[] severeQuotes = {
+                "🚨 喂喂！「" + appName + "」都连续刷了 " + minutes + " 分钟了！脑子不晕吗？",
+                "🚨 说好只玩一会儿的呢？团子都看不过去了，快退出来休息！🐱",
+                "🚨 停一下啦！「" + appName + "」严重超长待机了。站起来活动肩颈！"
+            };
+            showWarningBubble(severeQuotes[random.nextInt(severeQuotes.length)], 2);
+        }
+    }
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {

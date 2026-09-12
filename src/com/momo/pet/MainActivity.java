@@ -14,6 +14,8 @@ import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
+import android.widget.CompoundButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -120,6 +122,25 @@ public class MainActivity extends Activity {
         });
         actionCard.addView(statsBtn);
 
+        // 防沉迷守护设置入口按键
+        View spMonitor = new View(this);
+        spMonitor.setLayoutParams(new LinearLayout.LayoutParams(1, dp(10)));
+        actionCard.addView(spMonitor);
+
+        Button monitorBtn = new Button(this);
+        monitorBtn.setText("🛡️ 墨墨防沉迷守护 (应用时长监督)");
+        monitorBtn.setTextSize(14);
+        monitorBtn.setTextColor(0xFF2E3842);
+        monitorBtn.setBackground(makeBorderCard(0xFFF7F5F2, 0xFFDDD6CE, 14, 1));
+        monitorBtn.setPadding(dp(16), dp(12), dp(16), dp(12));
+        monitorBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Intent it = new Intent(MainActivity.this, MonitorSettingsActivity.class);
+                startActivity(it);
+            }
+        });
+        actionCard.addView(monitorBtn);
+
         // 收起墨墨按键
         View sp2 = new View(this);
         sp2.setLayoutParams(new LinearLayout.LayoutParams(1, dp(10)));
@@ -143,7 +164,51 @@ public class MainActivity extends Activity {
 
         root.addView(actionCard);
 
-        // 3. 玩法小贴士卡片
+        // 4. 音效设置卡片
+        View spSound = new View(this);
+        spSound.setLayoutParams(new LinearLayout.LayoutParams(1, dp(16)));
+        root.addView(spSound);
+
+        LinearLayout soundCard = new LinearLayout(this);
+        soundCard.setOrientation(LinearLayout.HORIZONTAL);
+        soundCard.setGravity(Gravity.CENTER_VERTICAL);
+        soundCard.setBackground(makeRounded(0xFFFFFFFF, 16));
+        soundCard.setPadding(dp(18), dp(16), dp(18), dp(16));
+        soundCard.setElevation(dp(2));
+
+        LinearLayout soundTextCol = new LinearLayout(this);
+        soundTextCol.setOrientation(LinearLayout.VERTICAL);
+
+        TextView tvSoundTitle = new TextView(this);
+        tvSoundTitle.setText("🔊 桌宠交互音效");
+        tvSoundTitle.setTextSize(14);
+        tvSoundTitle.setTypeface(null, Typeface.BOLD);
+        tvSoundTitle.setTextColor(0xFF33302C);
+        soundTextCol.addView(tvSoundTitle);
+
+        TextView tvSoundSub = new TextView(this);
+        tvSoundSub.setText("点击啵啵声、小猫喵呜叫、拖拽弹簧音与完成风铃");
+        tvSoundSub.setTextSize(11);
+        tvSoundSub.setTextColor(0xFF8A827A);
+        tvSoundSub.setPadding(0, dp(2), 0, 0);
+        soundTextCol.addView(tvSoundSub);
+
+        soundCard.addView(soundTextCol, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+
+        final Switch swSound = new Switch(this);
+        swSound.setChecked(SoundManager.isSoundEnabled(this));
+        swSound.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override public void onCheckedChanged(CompoundButton b, boolean checked) {
+                SoundManager.setSoundEnabled(MainActivity.this, checked);
+                if (checked) {
+                    SoundManager.getInstance(MainActivity.this).play("cat");
+                }
+            }
+        });
+        soundCard.addView(swSound);
+        root.addView(soundCard);
+
+        // 5. 玩法小贴士卡片
         View sp3 = new View(this);
         sp3.setLayoutParams(new LinearLayout.LayoutParams(1, dp(16)));
         root.addView(sp3);

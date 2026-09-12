@@ -29,7 +29,7 @@ public class StatsManager {
             .putLong(dKey, sp.getLong(dKey, 0L) + seconds)
             .putLong(wKey, sp.getLong(wKey, 0L) + seconds)
             .putLong(totalKey, sp.getLong(totalKey, 0L) + seconds)
-            .apply();
+            .commit(); // 同步强制写入磁盘，避免退出时内存数据丢失
     }
 
     public static long getTodayStudySec(Context context) {
