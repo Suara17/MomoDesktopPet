@@ -40,6 +40,12 @@ import java.util.Map;
 import java.util.Random;
 
 public class PetFloatingService extends Service {
+    private static volatile PetFloatingService instance;
+
+    public static PetFloatingService getInstance() {
+        return instance;
+    }
+
     private static final String CHANNEL_ID    = "momo_pet_channel";
     private static final int    NOTIF_ID      = 2026;
     private static final String ACTION_STOP   = "STOP";
@@ -231,6 +237,7 @@ public class PetFloatingService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         acquireWakeLock();
         createNotificationChannel();
         startForeground(NOTIF_ID, buildNotification());
@@ -270,6 +277,7 @@ public class PetFloatingService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        if (instance == this) instance = null;
         stopTimer();
         handler.removeCallbacksAndMessages(null);
         if (petContainer != null && windowManager != null) {
@@ -727,66 +735,74 @@ public class PetFloatingService extends Service {
 
         class CircleBtnItem {
             String label;
+            MenuIconView.IconType iconType;
             int bgColor;
-            int textColor;
+            int iconColor;
             View.OnClickListener listener;
-            CircleBtnItem(String l, int bg, int tc, View.OnClickListener lis) {
-                label = l; bgColor = bg; textColor = tc; listener = lis;
+            CircleBtnItem(String l, MenuIconView.IconType type, int bg, int ic, View.OnClickListener lis) {
+                label = l; iconType = type; bgColor = bg; iconColor = ic; listener = lis;
             }
         }
 
         List<CircleBtnItem> items = new ArrayList<>();
-        // 1. 专注
-        items.add(new CircleBtnItem("专注", 0xEE1E293B, 0xFF6EE7B7, new View.OnClickListener() {
+        // 1. 专注（极简翻开书本）
+        items.add(new CircleBtnItem("专注", MenuIconView.IconType.STUDY, 0xEE1E293B, 0xFF6EE7B7, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 hideMenu();
                 showTimerSelection(Mode.STUDY);
             }
         }));
-        // 2. 休闲
-        items.add(new CircleBtnItem("休闲", 0xEE1E293B, 0xFFFCD34D, new View.OnClickListener() {
+        // 2. 休闲（极简咖啡热茶）
+        items.add(new CircleBtnItem("休闲", MenuIconView.IconType.LEISURE, 0xEE1E293B, 0xFFFCD34D, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 hideMenu();
                 showTimerSelection(Mode.LEISURE);
             }
         }));
-        // 3. 音乐
-        items.add(new CircleBtnItem("音乐", 0xEE1E293B, 0xFFC084FC, new View.OnClickListener() {
+        // 3. 音乐（极简双音符）
+        items.add(new CircleBtnItem("音乐", MenuIconView.IconType.MUSIC, 0xEE1E293B, 0xFFC084FC, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 hideMenu();
                 showMusicMenu();
             }
         }));
-        // 4. 统计
-        items.add(new CircleBtnItem("统计", 0xEE1E293B, 0xFF38BDF8, new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                hideMenu();
-                Intent intent = new Intent(PetFloatingService.this, StatsActivity.class);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(intent);
-            }
-        }));
-        // 5. 守护设置
-        items.add(new CircleBtnItem("守护", 0xEE1E293B, 0xFFF472B6, new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                hideMenu();
-                Intent intent = new Intent(PetFloatingService.this, MonitorSettingsActivity.class);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(intent);
-            }
-        }));
+        // 4. 统计（极简柱状数据图表 - 仅在专注模块开启时展示）
+        if (ModuleConfigManager.isFocusEnabled(this)) {
+            items.add(new CircleBtnItem("统计", MenuIconView.IconType.STATS, 0xEE1E293B, 0xFF38BDF8, new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    hideMenu();
+                    Intent intent = new Intent(PetFloatingService.this, MainActivity.class);
+                    intent.putExtra("target_tab_name", "FOCUS");
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    startActivity(intent);
+                }
+            }));
+        }
+        // 5. 守护设置（极简安全守护盾牌 - 仅在防沉迷模块开启时展示）
+        if (ModuleConfigManager.isMonitorEnabled(this)) {
+            items.add(new CircleBtnItem("守护", MenuIconView.IconType.MONITOR, 0xEE1E293B, 0xFFF472B6, new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    hideMenu();
+                    Intent intent = new Intent(PetFloatingService.this, MainActivity.class);
+                    intent.putExtra("target_tab_name", "MONITOR");
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    startActivity(intent);
+                }
+            }));
+        }
 
         // 6. 若正在计时或在特殊模式，增加【暂停/继续】与【结束】按钮
         if (currentMode != Mode.NORMAL || timerRunning) {
             String pauseLabel = timerPaused ? "继续" : "暂停";
+            MenuIconView.IconType pauseType = timerPaused ? MenuIconView.IconType.RESUME : MenuIconView.IconType.PAUSE;
             int pauseColor = timerPaused ? 0xFF6EE7B7 : 0xFFFCD34D;
-            items.add(new CircleBtnItem(pauseLabel, 0xEE1E293B, pauseColor, new View.OnClickListener() {
+            items.add(new CircleBtnItem(pauseLabel, pauseType, 0xEE1E293B, pauseColor, new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     toggleTimerPause();
                     hideMenu();
                 }
             }));
-            items.add(new CircleBtnItem("结束", 0xEE450A0A, 0xFFFCA5A5, new View.OnClickListener() {
+            items.add(new CircleBtnItem("结束", MenuIconView.IconType.STOP, 0xEE450A0A, 0xFFFCA5A5, new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     switchToNormalMode();
                     hideMenu();
@@ -873,30 +889,33 @@ public class PetFloatingService extends Service {
             int btnCenterX = originX + (int) (activeRadius * Math.cos(rad));
             int btnCenterY = originY + (int) (activeRadius * Math.sin(rad));
 
-            Button b = new Button(this);
-            b.setText(item.label);
-            b.setTextSize(sizeIdx == 0 ? 9 : (sizeIdx == 1 ? 11 : 12));
-            b.setTypeface(null, android.graphics.Typeface.BOLD);
-            b.setTextColor(item.textColor);
-            b.setPadding(0, 0, 0, 0);
-            b.setGravity(Gravity.CENTER);
-
             // 纯净质感深空圆钮 + 磨砂微透描边
+            android.widget.FrameLayout btnContainer = new android.widget.FrameLayout(this);
             android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
             gd.setShape(android.graphics.drawable.GradientDrawable.OVAL);
             gd.setColor(item.bgColor);
             gd.setStroke(dp(1), 0x44FFFFFF);
-            b.setBackground(gd);
+            btnContainer.setBackground(gd);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                b.setElevation(dp(8));
+                btnContainer.setElevation(dp(8));
             }
 
-            b.setOnClickListener(item.listener);
+            // 极简矢量图标
+            MenuIconView iconView = new MenuIconView(this, item.iconType, item.iconColor);
+            android.widget.FrameLayout.LayoutParams ilp = new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            );
+            btnContainer.addView(iconView, ilp);
+
+            btnContainer.setClickable(true);
+            btnContainer.setFocusable(true);
+            btnContainer.setOnClickListener(item.listener);
 
             android.widget.FrameLayout.LayoutParams blp = new android.widget.FrameLayout.LayoutParams(btnSz, btnSz);
             blp.leftMargin = btnCenterX - btnSz / 2;
             blp.topMargin = btnCenterY - btnSz / 2;
-            circleOverlay.addView(b, blp);
+            circleOverlay.addView(btnContainer, blp);
         }
 
         circleOverlay.setOnClickListener(new View.OnClickListener() {
@@ -1814,6 +1833,50 @@ public class PetFloatingService extends Service {
                 }
             }
         } catch (Exception ignored) {}
+    }
+
+    // ── 自动记账实时反馈（支付通知捕获后调用）─────────────────────
+    public void onBillRecorded(final String channel, final double amount, final String shop) {
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                // 播放清脆入账音效（完成音）与细腻轻触感
+                try {
+                    SoundManager.getInstance(PetFloatingService.this).play("finish");
+                    long[] pattern = new long[]{0, 80, 60, 100};
+                    int[] amps = new int[]{0, 180, 0, 220};
+                    vibratePattern(pattern, amps);
+                } catch (Exception ignored) {}
+
+                // 根据金额生成墨墨专属拟人吐槽/报账气泡
+                String formattedAmt = String.format(Locale.getDefault(), "%.2f", amount);
+                String quote;
+                if (amount >= 200) {
+                    String[] bigQuotes = {
+                        "💸 " + channel + "支出 ￥" + formattedAmt + "！等等……钱包在冒烟了！( 👀 )",
+                        "💸 ￥" + formattedAmt + "（" + shop + "）！这笔是大支出呢，墨墨帮你记死在账本上啦。",
+                        "💸 扣款 ￥" + formattedAmt + "……团子的小鱼干基金是不是又少了一袋？喵。"
+                    };
+                    quote = bigQuotes[random.nextInt(bigQuotes.length)];
+                } else if (amount >= 50) {
+                    String[] midQuotes = {
+                        "🪙 " + channel + "记账 ￥" + formattedAmt + "（" + shop + "）。收据已塞进团子的小口袋~",
+                        "🪙 滴！￥" + formattedAmt + " 已记下。钱钱虽然变少了，但换成了快乐！(｡•̀ᴗ-)",
+                        "🪙 " + shop + " 消费 ￥" + formattedAmt + "。记好啦，今天继续合理规划哦~"
+                    };
+                    quote = midQuotes[random.nextInt(midQuotes.length)];
+                } else {
+                    String[] smallQuotes = {
+                        "🪙 " + channel + "支出 ￥" + formattedAmt + "（" + shop + "）。墨墨记好啦~",
+                        "🪙 滴！￥" + formattedAmt + " 小开销已入账。买了好吃的记得分团子一口喵~",
+                        "🪙 成功记下一笔 ￥" + formattedAmt + "。每一分钱团子都帮你盯着呢！(｡•̀ᴗ-)"
+                    };
+                    quote = smallQuotes[random.nextInt(smallQuotes.length)];
+                }
+
+                showBubble(quote, 4000);
+            }
+        });
     }
 
     @Override
