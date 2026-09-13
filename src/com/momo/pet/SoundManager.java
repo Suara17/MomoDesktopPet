@@ -68,6 +68,7 @@ public class SoundManager {
             loadSound("start", R.raw.sfx_start);
             loadSound("finish", R.raw.sfx_finish);
             loadSound("alert", R.raw.sfx_alert);
+            loadSound("bubble", R.raw.sfx_tap);
 
             isLoaded = true;
         } catch (Exception e) {
@@ -125,12 +126,14 @@ public class SoundManager {
             .edit().putInt(KEY_SOUND_VOLUME, Math.max(0, Math.min(100, percent))).commit();
     }
 
-    public void release() {
+    public synchronized void release() {
         if (soundPool != null) {
-            soundPool.release();
+            try { soundPool.release(); } catch (Exception ignored) {}
             soundPool = null;
         }
         soundMap.clear();
+        loadedSoundIds.clear();
         isLoaded = false;
+        instance = null; // 释放后置空单例，保证下次 getInstance() 重新完整初始化 SoundPool
     }
 }
