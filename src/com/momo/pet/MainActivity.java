@@ -947,6 +947,43 @@ public class MainActivity extends Activity {
         });
         rulesCard.addView(dailyRow);
 
+        View divR3 = new View(this);
+        divR3.setBackgroundColor(getDividerColor());
+        rulesCard.addView(divR3, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+
+        // 4) 守护范围选择 (监控所有第三方应用 vs 仅监控清单应用)
+        boolean isMonitorAll = AppMonitorManager.isMonitorAll(this);
+        LinearLayout allRow = new LinearLayout(this);
+        allRow.setOrientation(LinearLayout.HORIZONTAL);
+        allRow.setGravity(Gravity.CENTER_VERTICAL);
+        allRow.setPadding(0, dp(12), 0, dp(12));
+
+        LinearLayout allCol = new LinearLayout(this);
+        allCol.setOrientation(LinearLayout.VERTICAL);
+        TextView tvAllTitle = new TextView(this);
+        tvAllTitle.setText("守护范围：监控所有应用");
+        tvAllTitle.setTextSize(14);
+        tvAllTitle.setTextColor(getTitleTextColor());
+        allCol.addView(tvAllTitle);
+        TextView tvAllSub = new TextView(this);
+        tvAllSub.setText(isMonitorAll ? "当前对所有非系统应用生效" : "仅对下方重点关照清单应用生效");
+        tvAllSub.setTextSize(11);
+        tvAllSub.setTextColor(getSubTextColor());
+        allCol.addView(tvAllSub);
+        allRow.addView(allCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+        Switch swAll = new Switch(this);
+        swAll.setChecked(isMonitorAll);
+        swAll.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override public void onCheckedChanged(CompoundButton b, boolean checked) {
+                AppMonitorManager.setMonitorAll(MainActivity.this, checked);
+                tvAllSub.setText(checked ? "当前对所有非系统应用生效" : "仅对下方重点关照清单应用生效");
+                Toast.makeText(MainActivity.this, checked ? "已切换为守护所有应用" : "已切换为仅守护清单应用", Toast.LENGTH_SHORT).show();
+            }
+        });
+        allRow.addView(swAll);
+        rulesCard.addView(allRow);
+
         mainContentContainer.addView(rulesCard);
 
         // 4. 重点监督应用列表卡片 (包含内嵌的【+ 添加应用】与应用列表)
@@ -1369,19 +1406,149 @@ public class MainActivity extends Activity {
         tvSub.setPadding(0, dp(3), 0, 0);
         pCol.addView(tvSub);
 
+        LinearLayout badgeRow = new LinearLayout(this);
+        badgeRow.setOrientation(LinearLayout.HORIZONTAL);
+        badgeRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams brlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        brlp.topMargin = dp(6);
+        badgeRow.setLayoutParams(brlp);
+
         TextView tvBadge = new TextView(this);
-        tvBadge.setText("🌸 专属桌面伙伴 · 契约生效中");
-        tvBadge.setTextSize(11);
+        tvBadge.setText("🌸 契约生效中");
+        tvBadge.setTextSize(10.5f);
         tvBadge.setTypeface(null, Typeface.BOLD);
         tvBadge.setTextColor(0xFFE11D48);
         tvBadge.setBackground(makeRounded(0x25FB7185, 6));
-        tvBadge.setPadding(dp(8), dp(2), dp(8), dp(2));
-        LinearLayout.LayoutParams bdlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        bdlp.topMargin = dp(6);
-        pCol.addView(tvBadge, bdlp);
+        tvBadge.setPadding(dp(7), dp(2), dp(7), dp(2));
+        badgeRow.addView(tvBadge);
+
+        long totalCompSec = PetGrowthManager.getTotalCompanionSeconds(this);
+        String compTimeStr = PetGrowthManager.formatCompanionDuration(totalCompSec);
+        TextView tvCompanionTime = new TextView(this);
+        tvCompanionTime.setText("⏳ 共同度过 " + compTimeStr);
+        tvCompanionTime.setTextSize(10.5f);
+        tvCompanionTime.setTypeface(null, Typeface.BOLD);
+        tvCompanionTime.setTextColor(0xFF0284C7);
+        tvCompanionTime.setBackground(makeRounded(0x2238BDF8, 6));
+        tvCompanionTime.setPadding(dp(7), dp(2), dp(7), dp(2));
+        LinearLayout.LayoutParams ctlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ctlp.leftMargin = dp(6);
+        badgeRow.addView(tvCompanionTime, ctlp);
+
+        pCol.addView(badgeRow);
 
         profileCard.addView(pCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
         mainContentContainer.addView(profileCard);
+
+        // ════════ 1.5 养成体系卡片：墨墨的心情、羁绊等级与小鱼干互动 ════════
+        final int moodVal = PetGrowthManager.getMood(this);
+        final String moodDesc = PetGrowthManager.getMoodStatusDesc(moodVal);
+        final String bondTitle = PetGrowthManager.getLevelTitle(this);
+        final PetGrowthManager.LevelProgress lp = PetGrowthManager.getLevelProgress(this);
+        final int snacks = PetGrowthManager.getSnacks(this);
+
+        LinearLayout growthCard = new LinearLayout(this);
+        growthCard.setOrientation(LinearLayout.VERTICAL);
+        growthCard.setBackground(getThemedCardBg(16));
+        growthCard.setPadding(dp(16), dp(14), dp(16), dp(14));
+        LinearLayout.LayoutParams gclp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        gclp.topMargin = dp(10);
+        growthCard.setLayoutParams(gclp);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) growthCard.setElevation(dp(2));
+
+        // 顶部小标题行：羁绊称号 + 小鱼干互动
+        LinearLayout topGRow = new LinearLayout(this);
+        topGRow.setOrientation(LinearLayout.HORIZONTAL);
+        topGRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView tvBondTitle = new TextView(this);
+        tvBondTitle.setText("羁绊：" + bondTitle);
+        tvBondTitle.setTextSize(13.5f);
+        tvBondTitle.setTypeface(null, Typeface.BOLD);
+        tvBondTitle.setTextColor(getTitleTextColor());
+        topGRow.addView(tvBondTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+        final TextView btnFeed = makeActionPill("🐟 投喂团子 (" + snacks + ")", 0x22FB7185, 0xFFFB7185);
+        btnFeed.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (PetGrowthManager.feedSnack(MainActivity.this)) {
+                    Toast.makeText(MainActivity.this, "🐱 嗷呜！团子叼走小鱼干吃得肚皮圆滚滚，墨墨心情也变好了~ (心情+15, 羁绊+10)", Toast.LENGTH_SHORT).show();
+                    switchTab(0); // 刷新本页
+                } else {
+                    Toast.makeText(MainActivity.this, "团子的小鱼干吃光啦！去开启专注计时为团子赚口粮吧~", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+        topGRow.addView(btnFeed);
+        growthCard.addView(topGRow);
+
+        // 羁绊经验细胶囊进度条
+        LinearLayout expBarBg = new LinearLayout(this);
+        expBarBg.setBackground(makeRounded(0x33888888, 4));
+        LinearLayout.LayoutParams eblp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(6));
+        eblp.topMargin = dp(8);
+        expBarBg.setLayoutParams(eblp);
+
+        View expFill = new View(this);
+        expFill.setBackground(makeRounded(0xFF38BDF8, 4));
+        float expWeight = Math.max(0.02f, Math.min(1.0f, lp.progressFraction));
+        expBarBg.addView(expFill, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, expWeight));
+        View expEmpty = new View(this);
+        expBarBg.addView(expEmpty, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f - expWeight));
+        growthCard.addView(expBarBg);
+
+        // 进度提示文字
+        TextView tvExpInfo = new TextView(this);
+        tvExpInfo.setText("成长经验 " + lp.currentLevelExp + " / " + (lp.nextLevelNeedExp > 0 ? lp.nextLevelNeedExp : "MAX") + " (" + (int)(lp.progressFraction * 100) + "%)");
+        tvExpInfo.setTextSize(10.5f);
+        tvExpInfo.setTextColor(getSubTextColor());
+        tvExpInfo.setPadding(0, dp(4), 0, 0);
+        growthCard.addView(tvExpInfo);
+
+        // 分割线
+        View divG = new View(this);
+        divG.setBackgroundColor(getDividerColor());
+        LinearLayout.LayoutParams dglp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+        dglp.topMargin = dp(10);
+        dglp.bottomMargin = dp(10);
+        growthCard.addView(divG, dglp);
+
+        // 心情状态展示行
+        LinearLayout moodRow = new LinearLayout(this);
+        moodRow.setOrientation(LinearLayout.HORIZONTAL);
+        moodRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView tvMoodLabel = new TextView(this);
+        tvMoodLabel.setText("墨墨此刻心情：" + moodDesc);
+        tvMoodLabel.setTextSize(13);
+        tvMoodLabel.setTextColor(getTitleTextColor());
+        moodRow.addView(tvMoodLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+        TextView tvMoodScore = new TextView(this);
+        tvMoodScore.setText(moodVal + " / 100");
+        tvMoodScore.setTextSize(12.5f);
+        tvMoodScore.setTypeface(null, Typeface.BOLD);
+        tvMoodScore.setTextColor(moodVal >= 60 ? 0xFF10B981 : (moodVal >= 30 ? 0xFFF59E0B : 0xFFEF4444));
+        moodRow.addView(tvMoodScore);
+        growthCard.addView(moodRow);
+
+        // 心情细胶囊进度条
+        LinearLayout moodBarBg = new LinearLayout(this);
+        moodBarBg.setBackground(makeRounded(0x33888888, 4));
+        LinearLayout.LayoutParams mblp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(6));
+        mblp.topMargin = dp(8);
+        moodBarBg.setLayoutParams(mblp);
+
+        View moodFill = new View(this);
+        int moodFillColor = moodVal >= 60 ? 0xFF10B981 : (moodVal >= 30 ? 0xFFF59E0B : 0xFFF43F5E);
+        moodFill.setBackground(makeRounded(moodFillColor, 4));
+        float moodWeight = Math.max(0.02f, Math.min(1.0f, moodVal / 100.0f));
+        moodBarBg.addView(moodFill, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, moodWeight));
+        View moodEmpty = new View(this);
+        moodBarBg.addView(moodEmpty, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f - moodWeight));
+        growthCard.addView(moodBarBg);
+
+        mainContentContainer.addView(growthCard);
         // 2. 陪伴状态卡片（完全按需：只有开启专注或记账模块才展示对应卡片，均未开启则彻底隐藏）
         boolean isFocusOn = ModuleConfigManager.isFocusEnabled(this);
         boolean isBillOn = ModuleConfigManager.isBillEnabled(this);
@@ -1421,13 +1588,37 @@ public class MainActivity extends Activity {
         controlCard.setPadding(dp(16), dp(14), dp(16), dp(14));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) controlCard.setElevation(dp(2));
 
-        Button btnToggle = new Button(this);
+        int cardPercent = ModuleConfigManager.getCardAlpha(this);
+        int btnAlphaInt = (int) (cardPercent * 2.55f);
+        int btnBgColor;
+        int btnStrokeColor;
+        int btnTextColor;
+
+        if (isRunning) {
+            btnBgColor = (btnAlphaInt << 24) | 0x00334155;
+            btnStrokeColor = (Math.min(255, (int)(btnAlphaInt * 0.8f)) << 24) | 0x0094A3B8;
+            btnTextColor = isDarkBgTheme ? 0xFFCBD5E1 : 0xFF475569;
+        } else {
+            btnBgColor = (btnAlphaInt << 24) | 0x00E11D48;
+            btnStrokeColor = (Math.min(255, (int)(btnAlphaInt * 0.9f)) << 24) | 0x00FB7185;
+            btnTextColor = 0xFFFFFFFF;
+        }
+
+        GradientDrawable btnGd = new GradientDrawable();
+        btnGd.setCornerRadius(dp(14));
+        btnGd.setColor(btnBgColor);
+        btnGd.setStroke(dp(1), btnStrokeColor);
+
+        TextView btnToggle = new TextView(this);
         btnToggle.setText(isRunning ? "让墨墨回房间休息 (收起桌宠)" : "召唤墨墨与团子 (开启桌面陪伴)");
-        btnToggle.setTextSize(15);
+        btnToggle.setTextSize(14.5f);
         btnToggle.setTypeface(null, Typeface.BOLD);
-        btnToggle.setTextColor(0xFFFFFFFF);
-        btnToggle.setBackground(makeRounded(isRunning ? 0xFF475569 : 0xFF1E293B, 14));
-        btnToggle.setPadding(dp(18), dp(14), dp(18), dp(14));
+        btnToggle.setTextColor(btnTextColor);
+        btnToggle.setGravity(Gravity.CENTER);
+        btnToggle.setBackground(btnGd);
+        btnToggle.setPadding(dp(18), dp(13), dp(18), dp(13));
+        btnToggle.setClickable(true);
+        btnToggle.setFocusable(true);
         btnToggle.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {

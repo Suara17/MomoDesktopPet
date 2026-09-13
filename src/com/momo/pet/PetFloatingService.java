@@ -8,6 +8,8 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -40,6 +42,20 @@ import java.util.Map;
 import java.util.Random;
 
 public class PetFloatingService extends Service {
+    static class CircleBtnItem {
+        String label;
+        MenuIconView.IconType iconType;
+        int bgColor;
+        int iconColor;
+        View.OnClickListener listener;
+        CircleBtnItem(String l, MenuIconView.IconType type, int bg, int ic, View.OnClickListener lis) {
+            label = l; iconType = type; bgColor = bg; iconColor = ic; listener = lis;
+        }
+        CircleBtnItem(String l, int bg, int ic, View.OnClickListener lis) {
+            label = l; iconType = null; bgColor = bg; iconColor = ic; listener = lis;
+        }
+    }
+
     private static volatile PetFloatingService instance;
 
     public static PetFloatingService getInstance() {
@@ -723,40 +739,22 @@ public class PetFloatingService extends Service {
     //  模式切换菜单系统（环形主菜单 + 卡片子菜单）
     // ═══════════════════════════════════════════════════════════════
 
-    private void showMainMenu() {
+        private void showMainMenu() {
         if (circleOverlay == null || windowManager == null || petContainer == null) return;
         circleOverlay.removeAllViews();
         menuLayout.setVisibility(View.GONE);
 
-        // 按钮规格配置：贴边扇形时适当精致化，防止按钮自身过大相互踩踏
-        final int defaultBtnSz = (sizeIdx == 0) ? dp(38) : (sizeIdx == 1 ? dp(42) : dp(46));
-        final int petSz = dp(SIZES_DP[sizeIdx]);
-        final int radius = (int) (petSz * 0.70f); // 围绕人物中心向外的基准环绕半径
-
-        class CircleBtnItem {
-            String label;
-            MenuIconView.IconType iconType;
-            int bgColor;
-            int iconColor;
-            View.OnClickListener listener;
-            CircleBtnItem(String l, MenuIconView.IconType type, int bg, int ic, View.OnClickListener lis) {
-                label = l; iconType = type; bgColor = bg; iconColor = ic; listener = lis;
-            }
-        }
-
         List<CircleBtnItem> items = new ArrayList<>();
-        // 1. 专注（极简翻开书本）
+        // 1. 专注（极简翻开书本：展开专注时长与方式二级环形菜单）
         items.add(new CircleBtnItem("专注", MenuIconView.IconType.STUDY, 0xEE1E293B, 0xFF6EE7B7, new View.OnClickListener() {
             @Override public void onClick(View v) {
-                hideMenu();
-                showTimerSelection(Mode.STUDY);
+                showTimerSelectionRing(Mode.STUDY);
             }
         }));
-        // 2. 休闲（极简咖啡热茶）
+        // 2. 休闲（极简咖啡热茶：展开休闲时长与方式二级环形菜单）
         items.add(new CircleBtnItem("休闲", MenuIconView.IconType.LEISURE, 0xEE1E293B, 0xFFFCD34D, new View.OnClickListener() {
             @Override public void onClick(View v) {
-                hideMenu();
-                showTimerSelection(Mode.LEISURE);
+                showTimerSelectionRing(Mode.LEISURE);
             }
         }));
         // 3. 音乐（极简双音符）
@@ -790,7 +788,6 @@ public class PetFloatingService extends Service {
                 }
             }));
         }
-
         // 6. 若正在计时或在特殊模式，增加【暂停/继续】与【结束】按钮
         if (currentMode != Mode.NORMAL || timerRunning) {
             String pauseLabel = timerPaused ? "继续" : "暂停";
@@ -810,12 +807,62 @@ public class PetFloatingService extends Service {
             }));
         }
 
-        // ════ 智能环形方位决策 (上方圆环 / 下方圆环 / 左侧圆环 / 右侧圆环 / 全向饱满圆环) ════
+        renderCircleOverlay(items);
+    }
+
+    // 展现专注/休闲时长的二级星轨环形菜单（正向计时、15分、25分、45分、60分、返回）
+    private void showTimerSelectionRing(final Mode targetMode) {
+        if (circleOverlay == null || windowManager == null || petContainer == null) return;
+        circleOverlay.removeAllViews();
+
+        List<CircleBtnItem> subItems = new ArrayList<>();
+        int themeColor = (targetMode == Mode.STUDY) ? 0xFF6EE7B7 : 0xFFFCD34D;
+        int themeBg = (targetMode == Mode.STUDY) ? 0xEE064E3B : 0xEE78350F;
+
+        // 正计时选项
+        subItems.add(new CircleBtnItem("正向", themeBg, themeColor, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                hideMenu();
+                startModeWithCountUp(targetMode);
+                if (targetMode == Mode.STUDY) {
+                    showBubble("⏱️ 专注正向计时开启！在学习应用停留1分钟后墨墨将为你锁定~", 3500);
+                }
+            }
+        }));
+
+        int[] mins = {15, 25, 45, 60};
+        for (final int m : mins) {
+            subItems.add(new CircleBtnItem(m + "分", 0xEE1E293B, 0xFFFFFFFF, new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    hideMenu();
+                    startModeWithCountDown(targetMode, m * 60);
+                }
+            }));
+        }
+
+        // 返回主圆环按钮
+        subItems.add(new CircleBtnItem("返回", 0xEE334155, 0xFF94A3B8, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                showMainMenu();
+            }
+        }));
+
+        renderCircleOverlay(subItems);
+    }
+
+    // 核心通用星轨环形布局渲染器
+    private void renderCircleOverlay(List<CircleBtnItem> items) {
+        if (circleOverlay == null || windowManager == null || petContainer == null) return;
+        circleOverlay.removeAllViews();
+
+        final int defaultBtnSz = (sizeIdx == 0) ? dp(38) : (sizeIdx == 1 ? dp(42) : dp(46));
+        final int petSz = dp(SIZES_DP[sizeIdx]);
+        final int radius = (int) (petSz * 0.70f);
+
         int screenW = displayMetrics.widthPixels;
         int screenH = displayMetrics.heightPixels;
         int petCenterX = params.x + petSz / 2;
         int petCenterY = params.y + petSz / 2;
-
         int spaceTop = petCenterY - radius - defaultBtnSz / 2;
         int spaceBottom = screenH - (petCenterY + radius + defaultBtnSz / 2);
         int spaceLeft = petCenterX - radius - defaultBtnSz / 2;
@@ -825,10 +872,9 @@ public class PetFloatingService extends Service {
         double endAngleDeg;
         int activeRadius = radius;
         int btnSz = defaultBtnSz;
-
         int n = items.size();
+
         if (spaceLeft < dp(40) || edgeSide < 0) {
-            // 人物贴在左屏幕边缘 -> 弧度智能排布，向右侧开阔空间优雅环绕，保证按键不重叠且紧致
             btnSz = (sizeIdx == 0) ? dp(34) : (sizeIdx == 1 ? dp(38) : dp(42));
             activeRadius = (int) (petSz * 0.62f);
             int safeSpacing = dp(6);
@@ -838,7 +884,6 @@ public class PetFloatingService extends Service {
             startAngleDeg = -totalSpan / 2.0;
             endAngleDeg = totalSpan / 2.0;
         } else if (spaceRight < dp(40) || edgeSide > 0) {
-            // 人物贴在右屏幕边缘 -> 弧度智能排布，向左侧开阔空间优雅环绕，保证按键不重叠且紧致
             btnSz = (sizeIdx == 0) ? dp(34) : (sizeIdx == 1 ? dp(38) : dp(42));
             activeRadius = (int) (petSz * 0.62f);
             int safeSpacing = dp(6);
@@ -848,26 +893,22 @@ public class PetFloatingService extends Service {
             startAngleDeg = 180.0 - totalSpan / 2.0;
             endAngleDeg = 180.0 + totalSpan / 2.0;
         } else if (spaceTop < dp(50)) {
-            // 人物贴近屏幕顶部，上方空间不足 -> 在人物身下展开向下弧形 (角度: 35° ~ 145°)
             btnSz = defaultBtnSz;
             activeRadius = (int) (petSz * 0.60f);
             startAngleDeg = 35.0;
             endAngleDeg = 145.0;
         } else if (spaceBottom < dp(50)) {
-            // 人物贴近屏幕底部，下方空间不足 -> 在人物头顶展开向上弧形 (角度: 215° ~ 325°)
             btnSz = defaultBtnSz;
             activeRadius = (int) (petSz * 0.60f);
             startAngleDeg = 215.0;
             endAngleDeg = 325.0;
         } else {
-            // 人物处于屏幕中间舒适区 -> 360 度完美整圆环绕排列
             btnSz = defaultBtnSz;
             activeRadius = (int) (petSz * 0.65f);
-            startAngleDeg = -90.0; // 从正上方 12 点钟方向开始
+            startAngleDeg = -90.0;
             endAngleDeg = -90.0 + 360.0 * (n - 1) / n;
         }
 
-        // 计算独立 circleOverlay 悬浮窗口的物理位置与尺寸 (包容整个圆环)
         int winPadding = dp(8);
         int overlaySize = (activeRadius + btnSz / 2 + winPadding) * 2;
         int winLeft = petCenterX - overlaySize / 2;
@@ -885,28 +926,39 @@ public class PetFloatingService extends Service {
             CircleBtnItem item = items.get(i);
             double angleDeg = (n == 1) ? startAngleDeg : (startAngleDeg + i * (endAngleDeg - startAngleDeg) / (n - 1));
             double rad = Math.toRadians(angleDeg);
-
             int btnCenterX = originX + (int) (activeRadius * Math.cos(rad));
             int btnCenterY = originY + (int) (activeRadius * Math.sin(rad));
 
-            // 纯净质感深空圆钮 + 磨砂微透描边
             android.widget.FrameLayout btnContainer = new android.widget.FrameLayout(this);
             android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
             gd.setShape(android.graphics.drawable.GradientDrawable.OVAL);
             gd.setColor(item.bgColor);
-            gd.setStroke(dp(1), 0x44FFFFFF);
+            gd.setStroke(dp(1), 0x55FFFFFF);
             btnContainer.setBackground(gd);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 btnContainer.setElevation(dp(8));
             }
 
-            // 极简矢量图标
-            MenuIconView iconView = new MenuIconView(this, item.iconType, item.iconColor);
-            android.widget.FrameLayout.LayoutParams ilp = new android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-            );
-            btnContainer.addView(iconView, ilp);
+            if (item.iconType != null) {
+                MenuIconView iconView = new MenuIconView(this, item.iconType, item.iconColor);
+                android.widget.FrameLayout.LayoutParams ilp = new android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                );
+                btnContainer.addView(iconView, ilp);
+            } else {
+                TextView tv = new TextView(this);
+                tv.setText(item.label);
+                tv.setTextSize(item.label.length() > 2 ? 11 : 12);
+                tv.setTextColor(item.iconColor);
+                tv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                tv.setGravity(Gravity.CENTER);
+                android.widget.FrameLayout.LayoutParams tlp = new android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                );
+                btnContainer.addView(tv, tlp);
+            }
 
             btnContainer.setClickable(true);
             btnContainer.setFocusable(true);
@@ -932,8 +984,7 @@ public class PetFloatingService extends Service {
             }
         } catch (Exception ignored) {}
     }
-
-    private void showTimerSelection(final Mode targetMode) {
+private void showTimerSelection(final Mode targetMode) {
         menuLayout.removeAllViews();
 
         TextView title = new TextView(this);
@@ -1213,7 +1264,7 @@ public class PetFloatingService extends Service {
         startTimer();
         applyCurrentModeAction();
         int min = totalSec / 60;
-        showBubble(mode == Mode.STUDY ? ("番茄专注开始！目标 " + min + " 分钟，冲呀~") : ("休闲倒计时 " + min + " 分钟，尽情放松！"), 2500);
+        showBubble(mode == Mode.STUDY ? ("🍅 25分钟专注开始！打开你要学习的应用待满1分钟，墨墨就会为你锁定哦~") : ("休闲倒计时 " + min + " 分钟，尽情放松！"), 3500);
     }
 
     private void startModeWithoutTimer(Mode mode) {
@@ -1272,6 +1323,9 @@ public class PetFloatingService extends Service {
     private void startTimer() {
         timerRunning = true;
         timerPaused = false;
+        focusLockedPkg = null;
+        focusCandidatePkg = null;
+        focusCandidateStartTime = 0;
         timerView.setVisibility(View.VISIBLE);
         SoundManager.getInstance(this).play("start");
         handler.removeCallbacks(timerTickRunnable);
@@ -1283,6 +1337,9 @@ public class PetFloatingService extends Service {
     private void stopTimer() {
         timerRunning = false;
         timerPaused = false;
+        focusLockedPkg = null;
+        focusCandidatePkg = null;
+        focusCandidateStartTime = 0;
         handler.removeCallbacks(timerTickRunnable);
         handler.removeCallbacks(modeBubbleTickRunnable);
     }
@@ -1296,7 +1353,11 @@ public class PetFloatingService extends Service {
             handler.removeCallbacks(modeBubbleTickRunnable);
             updateTimerDisplay();
             play("daze", true, null);
-            showBubble("⏸ 计时已暂停，稍后再继续吧~", 2200);
+            if (focusLockedPkg != null) {
+                showBubble("⏸ 计时已暂停，专注锁定已临时解除，休息一下吧~", 2800);
+            } else {
+                showBubble("⏸ 计时已暂停，稍后再继续吧~", 2200);
+            }
         } else {
             handler.removeCallbacks(timerTickRunnable);
             handler.removeCallbacks(modeBubbleTickRunnable);
@@ -1370,8 +1431,12 @@ public class PetFloatingService extends Service {
             new long[]{0, 350, 150, 400},
             new int[]{0, 255, 0, 255}
         );
+        if (currentMode == Mode.STUDY) {
+            PetGrowthManager.onFocusCompleted(PetFloatingService.this, 25);
+        }
+        int curMood = PetGrowthManager.getMood(PetFloatingService.this);
         String msg = currentMode == Mode.STUDY
-            ? "叮！专注时间到啦！很棒哦，站起来喝口水伸个懒腰吧 🎉"
+            ? ("叮！专注时间到啦！墨墨心情大好 (" + curMood + "%)，赏你小鱼干+1！🎉")
             : "叮！休闲时间结束啦，感觉电量充满了吗？(。•̀ᴗ-)✧";
         showBubble(msg, 4000);
         playOnce("happy", new Runnable() {
@@ -1612,25 +1677,21 @@ public class PetFloatingService extends Service {
     };
 
     // ── 系统状态感知与监控循环（每 3 秒检测音乐播放与前台应用）─────────────────────
+    // ── 专注应用自动锁定与强制拉回机制 ────────────────────────────────
+    private String focusLockedPkg = null;          // 当前锁定的专注应用包名
+    private String focusCandidatePkg = null;       // 当前正在观察的应用包名
+    private long focusCandidateStartTime = 0;      // 候选应用在前台的起始时间戳
+    private long lastPullBackToastTime = 0;        // 防弹窗/Toast过于频繁
+    private String lastKnownForegroundPkg = null;  // 持续跟踪记忆的前台应用包名
     private boolean lastMusicPlaying = false;
     private void startAppMonitorLoop() {
         handler.postDelayed(appMonitorTick, 3000);
     }
 
-    private final Runnable appMonitorTick = new Runnable() {
-        @Override
-        public void run() {
-            checkMusicState();
-            checkForegroundAppUsage();
-            handler.postDelayed(this, 3000);
-        }
-    };
-
     private void checkMusicState() {
         boolean isPlaying = isDeviceMusicPlaying();
         if (isPlaying != lastMusicPlaying) {
             lastMusicPlaying = isPlaying;
-            // 只有在自由模式、未贴边、未在计时、未处于拖拽或单次交互动作中才自动切换音乐状态
             if (currentMode == Mode.NORMAL && !edgeMode && !timerRunning && !dragging && !isOneShot) {
                 if (isPlaying && actionMap.containsKey("listen_music")) {
                     play("listen_music", true, null);
@@ -1641,7 +1702,163 @@ public class PetFloatingService extends Service {
         }
     }
 
-    private void checkForegroundAppUsage() {
+    private final Runnable appMonitorTick = new Runnable() {
+        @Override
+        public void run() {
+            checkMusicState();
+            checkFocusAppLockAndPullBack(); // 专注模式应用锁定与防走神拉回
+            checkForegroundAppUsage();
+            // 累计桌宠在桌面的真实陪伴时长 (本轮周期秒数)
+            long currentIntervalSec = (timerRunning && !timerPaused && currentMode == Mode.STUDY && focusLockedPkg != null) ? 1 : 3;
+            PetGrowthManager.addCompanionSeconds(PetFloatingService.this, currentIntervalSec);
+            // 专注锁定时缩短检测周期到 1.5 秒，保证切走时迅速拉回
+            long nextDelay = (timerRunning && !timerPaused && currentMode == Mode.STUDY && focusLockedPkg != null) ? 1500 : 3000;
+            handler.postDelayed(this, nextDelay);
+        }
+    };
+
+        // 更加稳健精确的前台应用嗅探器 (兼容 Android 10 ~ 16)
+    // 更加稳健精确的前台应用嗅探器 (多通道事件感知 + 活跃记忆)
+    private String getActualForegroundPackage() {
+        try {
+            android.app.usage.UsageStatsManager usm = 
+                (android.app.usage.UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usm == null) return lastKnownForegroundPkg;
+            long now = System.currentTimeMillis();
+
+            // 方式一：查最近 3 分钟内的切换事件流 (ACTIVITY_RESUMED)
+            android.app.usage.UsageEvents events = usm.queryEvents(now - 180000, now);
+            if (events != null) {
+                android.app.usage.UsageEvents.Event event = new android.app.usage.UsageEvents.Event();
+                String latestPkg = null;
+                long latestTimestamp = 0;
+                while (events.hasNextEvent()) {
+                    events.getNextEvent(event);
+                    if (event.getEventType() == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED) {
+                        if (event.getTimeStamp() >= latestTimestamp) {
+                            latestTimestamp = event.getTimeStamp();
+                            latestPkg = event.getPackageName();
+                        }
+                    }
+                }
+                if (latestPkg != null) {
+                    lastKnownForegroundPkg = latestPkg;
+                    return latestPkg;
+                }
+            }
+
+            // 方式二：查最近使用状态列表兜底
+            List<android.app.usage.UsageStats> stats = usm.queryUsageStats(
+                android.app.usage.UsageStatsManager.INTERVAL_BEST, now - 300000, now
+            );
+            if (stats != null && !stats.isEmpty()) {
+                android.app.usage.UsageStats recent = null;
+                for (android.app.usage.UsageStats s : stats) {
+                    if (recent == null || s.getLastTimeUsed() > recent.getLastTimeUsed()) {
+                        recent = s;
+                    }
+                }
+                if (recent != null && recent.getPackageName() != null) {
+                    lastKnownForegroundPkg = recent.getPackageName();
+                    return recent.getPackageName();
+                }
+            }
+        } catch (Exception ignored) {}
+        return lastKnownForegroundPkg;
+    }
+
+    private void checkFocusAppLockAndPullBack() {
+        // 只有在专注计时、未暂停、且处于专注模式下生效
+        if (!timerRunning || timerPaused || currentMode != Mode.STUDY) return;
+
+        if (!AppMonitorManager.hasUsageStatsPermission(this)) {
+            long now = System.currentTimeMillis();
+            if (now - lastPullBackToastTime > 15000) {
+                lastPullBackToastTime = now;
+                showBubble("⚠️ 专注防走神需要【使用情况访问权限】哦，请在系统设置中允许墨墨读取~", 3000);
+            }
+            return;
+        }
+
+        String currentForeground = getActualForegroundPackage();
+        if (currentForeground == null) return;
+
+        String myPkg = getPackageName();
+        boolean isSystemOrLauncher = currentForeground.equals(myPkg) 
+                || "com.android.systemui".equals(currentForeground)
+                || currentForeground.contains("launcher") 
+                || currentForeground.contains("home");
+
+        long now = System.currentTimeMillis();
+
+        // 阶段一：尚未锁定专注目标应用 -> 观察是否在某个第三方应用停留
+        if (focusLockedPkg == null) {
+            if (isSystemOrLauncher) {
+                // 如果在桌面上或者桌宠设置页，暂不计时候选
+                return;
+            }
+
+            if (!currentForeground.equals(focusCandidatePkg)) {
+                // 刚切换到新的应用，开始为该应用计时 60 秒
+                focusCandidatePkg = currentForeground;
+                focusCandidateStartTime = now;
+                String appName = getAppDisplayName(currentForeground);
+                if (now - lastPullBackToastTime > 6000) {
+                    lastPullBackToastTime = now;
+                    showBubble("👀 墨墨正在观察「" + appName + "」... 连续停留1分钟将自动锁为专注目标哦~", 2500);
+                }
+            } else {
+                long durationSec = (now - focusCandidateStartTime) / 1000;
+                if (durationSec >= 60) {
+                    // 满 1 分钟！正式锁定目标应用！
+                    focusLockedPkg = currentForeground;
+                    String appName = getAppDisplayName(currentForeground);
+                    showBubble("🔒 已锁定专注应用「" + appName + "」！中途分心离开会被墨墨强制抓回来哦~", 4000);
+                    SoundManager.getInstance(this).play("cat");
+                }
+            }
+        } else {
+            // 阶段二：已经锁定专注目标应用 -> 严密监控！只要前台不是该应用（切到其他App或按Home回桌面）
+            if (!currentForeground.equals(focusLockedPkg)) {
+                // 自身桌宠主界面允许查看，其他全部抓回
+                if (!currentForeground.equals(myPkg)) {
+                    pullBackToLockedApp(now);
+                }
+            }
+        }
+    }
+
+    private void pullBackToLockedApp(long now) {
+        if (focusLockedPkg == null) return;
+        PackageManager pm = getPackageManager();
+        Intent launchIntent = pm.getLaunchIntentForPackage(focusLockedPkg);
+        if (launchIntent != null) {
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK 
+                    | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED 
+                    | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+            try {
+                startActivity(launchIntent);
+                if (now - lastPullBackToastTime > 3000) {
+                    lastPullBackToastTime = now;
+                    String appName = getAppDisplayName(focusLockedPkg);
+                    showBubble("⚠️ 专注时间不许分心！墨墨把你抓回「" + appName + "」啦！(点暂停可解锁)", 3000);
+                    SoundManager.getInstance(this).play("bubble");
+                }
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private String getAppDisplayName(String pkg) {
+        try {
+            PackageManager pm = getPackageManager();
+            ApplicationInfo info = pm.getApplicationInfo(pkg, 0);
+            return pm.getApplicationLabel(info).toString();
+        } catch (Exception e) {
+            return pkg;
+        }
+    }
+
+private void checkForegroundAppUsage() {
         // 如果未开启防沉迷，或者处于学习/休闲计时模式，不打扰
         if (!AppMonitorManager.isMonitorEnabled(this)) return;
         if (!AppMonitorManager.hasUsageStatsPermission(this)) return;
@@ -1767,10 +1984,12 @@ public class PetFloatingService extends Service {
             playOnce("angry", new Runnable() {
                 @Override public void run() { resumeCurrentMode(); }
             });
+            int ignoreCount = PetGrowthManager.onIgnoredGuardAdvice(PetFloatingService.this);
+            int curMood = PetGrowthManager.getMood(PetFloatingService.this);
             String[] severeQuotes = {
-                "🚨 喂喂！「" + appName + "」都连续刷了 " + minutes + " 分钟了！脑子不晕吗？",
-                "🚨 说好只玩一会儿的呢？团子都看不过去了，快退出来休息！🐱",
-                "🚨 停一下啦！「" + appName + "」严重超长待机了。站起来活动肩颈！"
+                "🚨 喂喂！连续两次提醒你都不听！墨墨生气了 (心情降至 " + curMood + "%)！(｀へ´)",
+                "🚨 说好只玩一会儿的呢？团子都生气了，墨墨不理你了！快退出来休息！🐱",
+                "🚨 还在玩「" + appName + "」！再不放下手机，墨墨今天都不理你啦！"
             };
             showWarningBubble(severeQuotes[random.nextInt(severeQuotes.length)], 2);
         }
